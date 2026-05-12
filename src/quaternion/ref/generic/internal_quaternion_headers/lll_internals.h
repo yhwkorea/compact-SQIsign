@@ -135,6 +135,7 @@ int ibq_set(ibq_t *q, const ibz_t *a, const ibz_t *b);
 /** @brief Copy value into target
  */
 void ibq_copy(ibq_t *target, const ibq_t *value);
+void ibq_reduce(ibq_t *x);
 
 /** @brief Checks if q is an integer
  *

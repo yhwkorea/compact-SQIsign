@@ -286,6 +286,7 @@ int quat_test_lattice(void);
  * const int primality_num_iter, const int equiv_bound_coeff);
  */
 int quat_test_lll(void);
+int quat_test_mlll(void);
 
 /** @brief Test operations on left ideals and their creation
  *
