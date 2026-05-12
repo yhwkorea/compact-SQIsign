@@ -13,7 +13,7 @@ set(SOURCE_FILES_QUATERNION_GENERIC_REF
     lll/l2.c
     lll/lll_verification.c
     lll/lll_applications.c
-    lll/rationals.c
+    lll/mlll.c
     normeq.c
     hnf/ibz_division.c
     hnf/hnf_internal.c

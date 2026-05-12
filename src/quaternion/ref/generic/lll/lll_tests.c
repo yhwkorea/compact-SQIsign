@@ -799,3 +799,114 @@ quat_test_lll(void)
     // res = res | quat_test_lll_lideal_prime_norm_reduced_equivalent();
     return (res);
 }
+
+/* ========== MLLL unit tests ========== */
+/* These tests cover Phase 1 acceptance for the Cohen-Pohst MLLL port: integer-only
+ * (ibq_t = ibz_t[2]) implementation in lll/mlll.c, no fp_t dependency.
+ * Tests are deliberately minimal sanity checks (rank, nonzero basis) — full
+ * 4-way equivalence with HNF is a Phase 2 goal. */
+
+#include "mlll_internals.h"
+
+static int
+quat_test_mlll_rank4(void)
+{
+    /* 4 independent generators = standard basis e_0..e_3 → MLLL must return rank 4. */
+    int ret = 0;
+    int rank = -1;
+    ibz_t q;
+    quat_alg_t alg;
+    ibz_vec_4_t gens[4];
+    ibz_mat_4x4_t basis;
+
+    ibz_init(&q);
+    ibz_mat_4x4_init(&basis);
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_init(&gens[i]);
+
+    ibz_set(&q, 3);
+    quat_alg_init_set(&alg, &q);
+
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            ibz_set(&(gens[i][j]), (i == j) ? 1 : 0);
+
+    quat_mlll(&basis, &rank, gens, 4, &alg);
+
+    if (rank != 4) {
+        printf("[mlll_rank4] FAIL: expected rank=4, got rank=%d\n", rank);
+        ret = -1;
+    }
+    int any_col_zero = 0;
+    for (int c = 0; c < 4; c++) {
+        int col_zero = 1;
+        for (int r = 0; r < 4; r++)
+            if (!ibz_is_zero(&(basis[r][c]))) { col_zero = 0; break; }
+        if (col_zero) { any_col_zero = 1; break; }
+    }
+    if (any_col_zero) {
+        printf("[mlll_rank4] FAIL: a basis column is all-zero (rank=%d)\n", rank);
+        ret = -1;
+    }
+
+    quat_alg_finalize(&alg);
+    ibz_mat_4x4_finalize(&basis);
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_finalize(&gens[i]);
+    ibz_finalize(&q);
+    return ret;
+}
+
+static int
+quat_test_mlll_dependent(void)
+{
+    /* 5 generators with one linearly dependent (e_0+e_1) → MLLL must reduce to rank 4. */
+    int ret = 0;
+    int rank = -1;
+    ibz_t q;
+    quat_alg_t alg;
+    ibz_vec_4_t gens[5];
+    ibz_mat_4x4_t basis;
+
+    ibz_init(&q);
+    ibz_mat_4x4_init(&basis);
+    for (int i = 0; i < 5; i++)
+        ibz_vec_4_init(&gens[i]);
+
+    ibz_set(&q, 3);
+    quat_alg_init_set(&alg, &q);
+
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            ibz_set(&(gens[i][j]), (i == j) ? 1 : 0);
+    ibz_set(&(gens[4][0]), 1);
+    ibz_set(&(gens[4][1]), 1);
+    ibz_set(&(gens[4][2]), 0);
+    ibz_set(&(gens[4][3]), 0);
+
+    quat_mlll(&basis, &rank, gens, 5, &alg);
+
+    if (rank != 4) {
+        printf("[mlll_dependent] FAIL: expected rank=4, got rank=%d\n", rank);
+        ret = -1;
+    }
+
+    quat_alg_finalize(&alg);
+    ibz_mat_4x4_finalize(&basis);
+    for (int i = 0; i < 5; i++)
+        ibz_vec_4_finalize(&gens[i]);
+    ibz_finalize(&q);
+    return ret;
+}
+
+int
+quat_test_mlll(void)
+{
+    int res = 0;
+    printf("\nRunning quaternion MLLL (Phase 1) unit tests\n");
+    res |= quat_test_mlll_rank4();
+    res |= quat_test_mlll_dependent();
+    if (res == 0)
+        printf("  All MLLL tests PASS\n");
+    return res;
+}

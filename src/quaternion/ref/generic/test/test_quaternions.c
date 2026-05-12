@@ -60,6 +60,7 @@ main(int argc, char *argv[])
     // res = res | quat_test_algebra();
     // res = res | quat_test_lattice();
     // res = res | quat_test_lll();
+    res = res | quat_test_mlll();
     // res = res | quat_test_lideal();
     // res = res | quat_test_normeq();
     // res = res | quat_test_lat_ball();
