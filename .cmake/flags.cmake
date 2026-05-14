@@ -31,6 +31,12 @@ else()
 		set(STRICT_OPTIONS_C "${STRICT_OPTIONS_C} -O3")
 	endif()
 	set(STRICT_OPTIONS_C "${STRICT_OPTIONS_C} -std=c11 -Wno-error=strict-prototypes -fvisibility=hidden -funroll-loops -Wno-error=implicit-function-declaration -Wno-error=attributes")
+	# GCC 14 false-positives — 한 가지씩 error 에서 제외. 다른 strict 옵션은 유지.
+	# - mp.c:297 의 `x[0] ^= ...` 에서 maybe-uninitialized (직전 mp_add 추적 실패)
+	# - apps/fuzz_verify.c:26 의 snprintf("%s.bin", ...) 에서 format-truncation
+	if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+		set(STRICT_OPTIONS_C "${STRICT_OPTIONS_C} -Wno-error=maybe-uninitialized -Wno-error=format-truncation")
+	endif()
 	if(CMAKE_C_COMPILER_ID MATCHES "Clang")
 		set(STRICT_OPTIONS_CPP "${STRICT_OPTIONS_CPP} -Wno-error=unknown-warning-option -Qunused-arguments -Wno-tautological-compare")
 		set(STRICT_OPTIONS_CPP "${STRICT_OPTIONS_CPP} -Wno-pass-failed")

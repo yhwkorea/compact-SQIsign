@@ -13,19 +13,30 @@ extern "C"
 #endif
 
 #ifndef IBZ_LIMBS
-/* SQISIGN_VARIANT is defined as lvl1, lvl3, or lvl5 by the build system */
-#define SQISIGN_LVL1 lvl1
-#define SQISIGN_LVL3 lvl3
-#define SQISIGN_LVL5 lvl5
+/* SQISIGN_VARIANT is defined by the build system as token `lvl1`/`lvl3`/`lvl5`.
+ *
+ * Note: a previous version compared tokens via `#if SQISIGN_VARIANT == SQISIGN_LVL1`,
+ * but the C preprocessor evaluates undefined identifier tokens as 0 in `#if`
+ * expressions, so `lvl1 == lvl1` becomes `0 == 0` and ALL THREE BRANCHES
+ * matched — meaning every level got IBZ_LIMBS=110. This caused the L3 precomp
+ * data file (encoded with 168-limb arrays) to overflow the 110-limb buffer
+ * with 'excess elements in array initializer'.
+ *
+ * Fix: token concatenation. CONCAT(IBZ_LIMBS_, SQISIGN_VARIANT) expands to
+ * IBZ_LIMBS_lvl1 / IBZ_LIMBS_lvl3 / IBZ_LIMBS_lvl5, each of which IS defined
+ * to the correct number. This selects per-level width via real macro
+ * substitution, not the broken token-equality #if. */
+#define _IBZ_CONCAT(a, b) a##b
+#define _IBZ_CONCAT2(a, b) _IBZ_CONCAT(a, b)
 
-#if SQISIGN_VARIANT == SQISIGN_LVL1
-#define IBZ_LIMBS 110  /* NIST Level I */
-#elif SQISIGN_VARIANT == SQISIGN_LVL3
-#define IBZ_LIMBS 168  /* NIST Level III */
-#elif SQISIGN_VARIANT == SQISIGN_LVL5
-#define IBZ_LIMBS 222  /* NIST Level V */
+#define IBZ_LIMBS_lvl1 110  /* NIST Level I */
+#define IBZ_LIMBS_lvl3 168  /* NIST Level III */
+#define IBZ_LIMBS_lvl5 222  /* NIST Level V */
+
+#ifdef SQISIGN_VARIANT
+#define IBZ_LIMBS _IBZ_CONCAT2(IBZ_LIMBS_, SQISIGN_VARIANT)
 #else
-#define IBZ_LIMBS 222  /* Default to NIST Level V */
+#define IBZ_LIMBS 222  /* Default to NIST Level V if SQISIGN_VARIANT unset */
 #endif
 #endif
 
