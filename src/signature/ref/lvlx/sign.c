@@ -94,7 +94,7 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
     quat_lattice_finalize(&lattice_hom_chall_to_com);
 }
 
-static void
+static int
 compute_backtracking_signature(signature_t *sig, quat_alg_elem_t *resp_quat, ibz_t *lattice_content, ibz_t *remain)
 {
     uint_fast8_t backtracking;
@@ -106,7 +106,15 @@ compute_backtracking_signature(signature_t *sig, quat_alg_elem_t *resp_quat, ibz
 
     quat_alg_make_primitive(&dummy_coord, &tmp, resp_quat, &MAXORD_O0);
     ibz_mul(&resp_quat->denom, &resp_quat->denom, &tmp);
-    assert(quat_lattice_contains(NULL, &MAXORD_O0, resp_quat));
+    // Under NDEBUG the assert(ok) inside quat_alg_make_primitive is compiled out,
+    // so a quat_lattice_contains failure silently propagates garbage downstream
+    // and protocols_sign's retry loop spins on impossible invariants. Detect the
+    // failure here and bubble it up so the outer loop can retry from commit.
+    if (!quat_lattice_contains(NULL, &MAXORD_O0, resp_quat)) {
+        ibz_finalize(&tmp);
+        ibz_vec_4_finalize(&dummy_coord);
+        return 0;
+    }
 
     // the backtracking is the common part of the response and the challenge
     // its degree is the scalar tmp computed above such that quat_resp is in tmp * O0.
@@ -118,10 +126,12 @@ compute_backtracking_signature(signature_t *sig, quat_alg_elem_t *resp_quat, ibz
 
     ibz_finalize(&tmp);
     ibz_vec_4_finalize(&dummy_coord);
+    return 1;
 }
 
-static uint_fast8_t
-compute_random_aux_norm_and_helpers(signature_t *sig,
+static int
+compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
+                                    signature_t *sig,
                                     ibz_t *random_aux_norm,
                                     ibz_t *degree_resp_inv,
                                     ibz_t *remain,
@@ -132,6 +142,7 @@ compute_random_aux_norm_and_helpers(signature_t *sig,
 {
     uint_fast8_t pow_dim2_deg_resp;
     uint_fast8_t exp_diadic_val_full_resp;
+    int ret = 0;
 
     ibz_t tmp, degree_full_resp, degree_odd_resp, norm_d;
 
@@ -143,10 +154,18 @@ compute_random_aux_norm_and_helpers(signature_t *sig,
 
     quat_alg_norm(&degree_full_resp, &norm_d, resp_quat, &QUATALG_PINFTY);
 
+    // Under NDEBUG the asserts below are compiled out, so a non-unit norm_d or
+    // a non-zero remain quietly propagates garbage and starves the outer retry
+    // loop. Detect each invariant violation here and signal a retry.
+    if (!ibz_is_one(&norm_d)) {
+        goto done;
+    }
+
     // dividing by n(lideal_com) * n(lideal_secret_chall)
-    assert(ibz_is_one(&norm_d));
     ibz_div(&degree_full_resp, remain, &degree_full_resp, lattice_content);
-    assert(ibz_cmp(remain, &ibz_const_zero) == 0);
+    if (ibz_cmp(remain, &ibz_const_zero) != 0) {
+        goto done;
+    }
 
     // computing the diadic valuation
     exp_diadic_val_full_resp = ibz_two_adic(&degree_full_resp);
@@ -155,7 +174,9 @@ compute_random_aux_norm_and_helpers(signature_t *sig,
     // removing the power of two part
     ibz_pow(&tmp, &ibz_const_two, exp_diadic_val_full_resp);
     ibz_div(&degree_odd_resp, remain, &degree_full_resp, &tmp);
-    assert(ibz_cmp(remain, &ibz_const_zero) == 0);
+    if (ibz_cmp(remain, &ibz_const_zero) != 0) {
+        goto done;
+    }
 #ifndef NDEBUG
     ibz_pow(&tmp, &ibz_const_two, SQIsign_response_length - sig->backtracking);
     assert(ibz_cmp(&tmp, &degree_odd_resp) > 0);
@@ -181,12 +202,15 @@ compute_random_aux_norm_and_helpers(signature_t *sig,
 
     ibz_invmod(degree_resp_inv, &degree_odd_resp, remain);
 
+    *out_pow_dim2_deg_resp = pow_dim2_deg_resp;
+    ret = 1;
+done:
     ibz_finalize(&degree_full_resp);
     ibz_finalize(&degree_odd_resp);
     ibz_finalize(&norm_d);
     ibz_finalize(&tmp);
 
-    return pow_dim2_deg_resp;
+    return ret;
 }
 
 static int
@@ -541,20 +565,30 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
 
         // computing the amount of backtracking we're making
         // and removing it
-        compute_backtracking_signature(sig, &resp_quat, &lattice_content, &remain);
+        if (!compute_backtracking_signature(sig, &resp_quat, &lattice_content, &remain)) {
+            // make_primitive's lattice-containment invariant was violated (silently
+            // under NDEBUG). Retry from commit instead of spinning forever.
+            ret = 0;
+            continue;
+        }
         printf("--compute_backtracking_signature done--\n");
 
         // creating lideal_com * lideal_resp
         // we first compute the norm of lideal_resp
         // norm of the resp_quat
-        pow_dim2_deg_resp = compute_random_aux_norm_and_helpers(sig,
-                                                                &random_aux_norm,
-                                                                &degree_resp_inv,
-                                                                &remain,
-                                                                &lattice_content,
-                                                                &resp_quat,
-                                                                &lideal_com_resp,
-                                                                &lideal_commit);
+        if (!compute_random_aux_norm_and_helpers(&pow_dim2_deg_resp,
+                                                 sig,
+                                                 &random_aux_norm,
+                                                 &degree_resp_inv,
+                                                 &remain,
+                                                 &lattice_content,
+                                                 &resp_quat,
+                                                 &lideal_com_resp,
+                                                 &lideal_commit)) {
+            // Norm/divisibility invariants violated under NDEBUG; retry from commit.
+            ret = 0;
+            continue;
+        }
         printf("--compute_random_aux_norm_and_helpers done--\n");
 
         // notational conventions:
