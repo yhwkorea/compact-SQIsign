@@ -646,6 +646,28 @@ quat_lattice_mul_mlll(quat_lattice_t *res,
 }
 
 void
+quat_lattice_intersect_mlll(quat_lattice_t *res,
+                            const quat_lattice_t *lat1,
+                            const quat_lattice_t *lat2,
+                            const quat_alg_t *alg)
+{
+    /* Same structure as quat_lattice_intersect (lattice.c), but inner
+     * sum uses MLLL alternate. Final HNF retained for canonical form. */
+    quat_lattice_t dual1, dual2, dual_res;
+    quat_lattice_init(&dual1);
+    quat_lattice_init(&dual2);
+    quat_lattice_init(&dual_res);
+    quat_lattice_dual_without_hnf(&dual1, lat1);
+    quat_lattice_dual_without_hnf(&dual2, lat2);
+    quat_lattice_add_mlll(&dual_res, &dual1, &dual2, alg);
+    quat_lattice_dual_without_hnf(res, &dual_res);
+    quat_lattice_hnf(res);
+    quat_lattice_finalize(&dual1);
+    quat_lattice_finalize(&dual2);
+    quat_lattice_finalize(&dual_res);
+}
+
+void
 quat_lattice_add_mlll(quat_lattice_t *res,
                       const quat_lattice_t *lat1,
                       const quat_lattice_t *lat2,
