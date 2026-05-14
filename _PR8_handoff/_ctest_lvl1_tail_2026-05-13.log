@@ -1,0 +1,41 @@
+=== EXIT=8
+--compute_random_aux_norm_and_helpers done--
+--evaluate_random_aux_isogeny_signature done--
+--commit done--
+--compute_challenge_ideal_signature done--
+--compute_response_quat_element done--
+--compute_backtracking_signature done--
+--compute_random_aux_norm_and_helpers done--
+--evaluate_random_aux_isogeny_signature done--
+--commit done--
+--compute_challenge_ideal_signature done--
+--compute_response_quat_element done--
+--compute_backtracking_signature done--
+--compute_random_aux_norm_and_helpers done--
+--evaluate_random_aux_isogeny_signature done--
+--commit done--
+--compute_challenge_ideal_signature done--
+--compute_response_quat_element done--
+--compute_backtracking_signature done--
+
+      Start 24: sqisign_test_threadsafety_lvl1
+ 9/12 Test #24: sqisign_test_threadsafety_lvl1 ...***Timeout 1500.05 sec
+
+      Start 29: sqisign_test_nistapi_lvl1
+10/12 Test #29: sqisign_test_nistapi_lvl1 ........   Passed  275.14 sec
+      Start 32: sqisign_lvl1_KAT
+11/12 Test #32: sqisign_lvl1_KAT .................***Failed   23.46 sec
+ERROR: pk is different from <../../KAT/PQCsignKAT_353_SQIsign_lvl1.rsp>
+
+      Start 33: sqisign_lvl1_SELFTEST
+12/12 Test #33: sqisign_lvl1_SELFTEST ............   Passed  320.69 sec
+
+75% tests passed, 3 tests failed out of 12
+
+Total Test time (real) = 4581.33 sec
+
+The following tests FAILED:
+	 23 - sqisign_test_signature_lvl1 (Timeout)
+	 24 - sqisign_test_threadsafety_lvl1 (Timeout)
+	 32 - sqisign_lvl1_KAT (Failed)
+Errors while running CTest
