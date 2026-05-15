@@ -82,7 +82,11 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
 
     // now we compute lideal_com_to_chall which is dual(Icom)* lideal_chall_secret
     quat_lattice_conjugate_without_hnf(&lat_commit, &(lideal_commit->lattice));
-    quat_lattice_intersect(&lattice_hom_chall_to_com, &lideal_chall_secret.lattice, &lat_commit);
+    /* Phase 2 hot-path: route through Cohen integer GSO MLLL alternate.
+     * Currently ~6x slower than HNF baseline (see PHASE2_TRIAL_2026-05-15_KO.md).
+     * Kept in main so the school machine can git pull and debug/optimize directly.
+     * To restore HNF baseline temporarily: revert this line to quat_lattice_intersect. */
+    quat_lattice_intersect_mlll(&lattice_hom_chall_to_com, &lideal_chall_secret.lattice, &lat_commit, &QUATALG_PINFTY);
 
     // sampling the smallest response
     ibz_mul(lattice_content, &lideal_chall_secret.norm, &lideal_commit->norm);
