@@ -1,6 +1,7 @@
 #include <quaternion.h>
 #include <rng.h>
 #include "internal.h"
+#include "lll_internals.h" /* for quat_ml2 (paper Issue 8 wire) */
 
 // helper functions
 int
@@ -110,7 +111,28 @@ quat_lattice_add(quat_lattice_t *res, const quat_lattice_t *lat1, const quat_lat
     assert(!ibz_is_zero(&det1));
     assert(!ibz_is_zero(&det2));
     ibz_gcd(&detprod, &det1, &det2);
-    ibz_mat_4xn_hnf_mod_core(&(res->basis), 8, generators, &detprod);
+    /* paper Issue 8 wire (2026-05-17 04:10 retry with ml2 entry trace).
+     * Fallback (2026-05-17 18:xx): if ML2 aborts (oscillation/iter-cap),
+     * use the original HNF on the 8 generators. detprod is a multiple of
+     * the union lattice volume, suitable as the HNF modulus. */
+    {
+        ibz_vec_4_t reduced[8];
+        for (int i = 0; i < 8; i++)
+            ibz_vec_4_init(&reduced[i]);
+        int rho = quat_ml2(reduced, 4, generators, 8, NULL);
+        if (rho < 0) {
+            static int _hnf_fb_n = 0;
+            if (_hnf_fb_n++ < 3)
+                fprintf(stderr, "[LATTICE-ADD] ML2 abort, HNF fallback (%d)\n", _hnf_fb_n);
+            ibz_mat_4xn_hnf_mod_core(&(res->basis), 8, generators, &detprod);
+        } else {
+            for (int j = 0; j < 4; j++)
+                for (int i = 0; i < 4; i++)
+                    ibz_copy(&(res->basis[i][j]), &reduced[j][i]);
+        }
+        for (int i = 0; i < 8; i++)
+            ibz_vec_4_finalize(&reduced[i]);
+    }
     ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
     quat_lattice_reduce_denom(res, res);
     ibz_mat_4x4_finalize(&tmp);
@@ -135,7 +157,11 @@ quat_lattice_intersect(quat_lattice_t *res, const quat_lattice_t *lat1, const qu
     quat_lattice_dual_without_hnf(&dual2, lat2);
     quat_lattice_add(&dual_res, &dual1, &dual2);
     quat_lattice_dual_without_hnf(res, &dual_res);
-    quat_lattice_hnf(res); // could be removed if we do not expect HNF any more
+    /* paper Issue 8 (2026-05-17): removed the redundant final HNF.
+     * The lattice basis is already a valid (non-HNF) basis; consumers via
+     * sample_response only need a basis matrix, not a unique form. Original
+     * comment in upstream: "could be removed if we do not expect HNF any more". */
+    /* quat_lattice_hnf(res); */
     quat_lattice_finalize(&dual1);
     quat_lattice_finalize(&dual2);
     quat_lattice_finalize(&dual_res);

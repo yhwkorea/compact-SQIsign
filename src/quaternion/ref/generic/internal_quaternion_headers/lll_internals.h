@@ -247,4 +247,18 @@ ibq_print_scalar(const char *name, const ibq_t *x)
 // end of lll_internal
 /** @}
  */
+
+/** ML2 — Modified L2 algorithm (NS09 Figure 9), generic d-rank input.
+ *
+ * Reduces d input generators (4-dimensional integer vectors). Writes up to
+ * `out_capacity` reduced basis vectors into `output`, returns the rank.
+ *
+ * Used to replace `ibz_mat_4xn_hnf_mod_core` and `quat_lattice_hnf` in the
+ * lattice operations (paper Issue 8: "HNF 부분만 ML2로 교체"). */
+int quat_ml2(ibz_vec_4_t *output,
+             int out_capacity,
+             const ibz_vec_4_t *input,
+             int d,
+             const quat_alg_t *alg);
+
 #endif
