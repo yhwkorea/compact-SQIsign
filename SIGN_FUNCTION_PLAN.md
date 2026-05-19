@@ -3,6 +3,15 @@
 생성: 2026-05-19. 측정: IBZ_LIMBS_lvl1=256 (~sonnet sub 측정 + memory 종합).
 Paper: `/tmp/compact_v2/{03Ideal,04Sampling,05Improve,93idtoiso}.tex`.
 
+## 2026-05-19 후속 update (commit `5ff147b`)
+
+3개 saturate 지점 (R3, R5, R8) 모두 해결됨. 28-limb lvl1 sign+verify EXIT=0 (seed=1, 33s).
+- **R3 `quat_lattice_intersect_mlll`** — IMLLL L14 측정 **9886 → 324 bit** (28-limb). paper Issue 8 wire + LatticeDual GCD normalization (commit 71fca30) + `quat_lattice_alg_elem_mul`의 HNF→ML2 교체 (commit 5ff147b) 합산 효과. paper bound 1626 bit 안.
+- **R5 `quat_alg_norm`** — Issue 9 `_with_norm` 라우팅으로 known-N 경로에서 `quat_alg_norm(x)` 자체 호출이 제거됨 (id2iso 1977 bit transient 사라짐). 남은 직접 호출 ALGNORM peak = 648 bit (response quat norm post-LLL).
+- **R8 `ibz_mat_4x4_inv_with_det_as_denom`** — `quat_lideal_create_with_norm`가 norm 재계산 chain skip해서 NDEBUG에선 5233-bit det 안 만들어짐. 남은 호출처(`quat_lattice_add` 내부)는 ML2 #0 peak 1520 bit에 흡수, 28-limb cap 안.
+
+자세한 최종 측정 테이블은 commit message 또는 [`MEMORY.md` index의 `project_sqisign_signtime_chains`] 참조.
+
 ---
 
 ## 표기
@@ -48,12 +57,12 @@ Paper: `/tmp/compact_v2/{03Ideal,04Sampling,05Improve,93idtoiso}.tex`.
 |---|---|---|---|---|---|---|
 | R1 | I_sk · I_chl | `quat_lideal_inter` | — | 260 → 386 | — | OK |
 | R2 | I_com conjugate | `quat_lattice_conjugate_without_hnf` | — | 139 → 139 | — | OK |
-| **R3** | **L = I_sk·I_chl ∩ dual(I_com)** | **`quat_lattice_intersect_mlll`** | **CompactLatticeIntersection (`03Ideal:152`)** | **9886 (ibz_mul internal)** | **L13: $2^{41}p^5 \approx 1281$**<br>**L14: $2^{138}p^6 \approx 1626$** | **❌ stuck (500k iter cap, swap oscillation, `/tmp/sig37.err`)** |
+| **R3** | **L = I_sk·I_chl ∩ dual(I_com)** | **`quat_lattice_intersect_mlll`** | **CompactLatticeIntersection (`03Ideal:152`)** | ~~9886~~ → **324** (28-limb) | **L14: $2^{138}p^6 \approx 1626$** | ✅ **RESOLVED (5ff147b)** |
 | R4 | small x ∈ L | `quat_lattice_sample_from_ball` | (`05Improve:60` L24) | rad=649, out=325 | L24: $2^{21}p^7 \approx 1757$ | OK (R3 통과 후) |
-| R5 | x norm | `quat_alg_norm` | — | 865 → **1977** | $2\cdot\text{in}$ | ❌ saturate |
+| R5 | x norm | `quat_alg_norm` | — | ~~1977~~ → **648** (Issue 9 라우팅) | $2\cdot\text{in}$ | ✅ **RESOLVED (5ff147b)** |
 | R6 | x conjugate | `quat_alg_conj` | — | 865 | — | OK |
 | R7 | (x̄, N) → I_com_resp | `quat_lideal_create` | — | 865+513 → 514 | — | OK |
-| R8 | I_com_resp 내부 inv | `ibz_mat_4x4_inv_with_det_as_denom` | AdjugateWithDet | det=**5233**, inv=2348 | — | ❌ saturate |
+| R8 | I_com_resp 내부 inv | `ibz_mat_4x4_inv_with_det_as_denom` | AdjugateWithDet | ~~5233~~ → skip된 경로 (NDEBUG) | — | ✅ **RESOLVED (5ff147b, via _with_norm)** |
 
 ---
 
@@ -101,21 +110,20 @@ Paper: `/tmp/compact_v2/{03Ideal,04Sampling,05Improve,93idtoiso}.tex`.
 
 ## 진행 가능 path
 
-| Path | 설명 | IBZ_LIMBS | paper claim 도달 | 작업 크기 |
-|---|---|---|---|---|
-| **A** | ml2-fallback + reduce_denom 재측정 | 110 → 측정 가능 | ❌ (1942 bit) | 소 (HANDOFF 이어서) |
-| **B** | IBZ_LIMBS=200 baseline 측정 | 200 | ❌ 명시 포기 | 중 |
-| **C** | 1저자 보고: paper Issue 8 wire 한계 + paper bound 재정정 제안 | — | — | 중 (REPORT 갱신) |
-| **D** | Paper Algorithm 수정 제안 (Path A: 새 ideal 표현) | — | ? | 대 (한 세션 초과) |
+~~Path A~~ → **DONE in commit `5ff147b`** (5월 19일).
 
-**사용자 답변(이전 turn)**: Path A (ml2-fallback + reduce_denom 굽파기)로 진행 결정.
+paper Issue 8 본 정공이 `quat_lattice_alg_elem_mul`에 미적용이던 게 R3/R5/R8 saturate의 공통 source였음. 거기 HNF를 ML2(d=4)로 교체하니 모든 측정 paper bound 안에 들어옴. 다음 step 들 (Path B/C/D) 불필요.
 
----
+## 최종 측정 (lvl1, IBZ_LIMBS=28, seed=1)
 
-## 다음 step (Path A 기준)
-
-1. mlll.c:649 `quat_lattice_intersect_mlll` 본문 검토 — paper-strict 분기 vs ml2-fallback 분기 어느 경로 실행되는지
-2. ml2 (`lll/ml2.c`) wire가 fallback에서 active한지 확인
-3. `reduce_denom` 추가 적용 위치 확인 (HANDOFF.md Path B)
-4. 28 limbs 시도하지 말고 110 limbs baseline에서 BD-INTER bit 측정 — paper bound 1626 vs 측정값 직접 확인
-5. ml2-fallback 경로의 BD-INTER 측정 + paper bound 비교가 1저자 보고의 데이터 핵심
+```
+ML2 #0 (keygen)       peak 1520 bit < 1757 (paper sign bound)
+ML2 #1 (commit)            1516
+ML2 #2 (response)          1411
+ALGNORM (R5 영역)           648
+IMLLL L14 (R3 영역)          324
+sample_response (R4)        522
+LMUL post_mul              250
+sampling (mod N path)       512
+```
+모두 28-limb cap 1792 bit 안. paper Theorem 2 / Theorem keygen-bound 모든 라인 만족.
