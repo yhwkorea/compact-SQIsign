@@ -317,7 +317,59 @@ quat_lattice_mul(quat_lattice_t *res,
     // ibz_finalize(&t1);
     // ibz_finalize(&t2);
 
-    ibz_mat_4xn_hnf_mod_core(&(res->basis), 16, generators, &hnfmod);
+    {
+        int gmax = 0;
+        for (int g = 0; g < 16; g++)
+            for (int c = 0; c < 4; c++) {
+                int b = ibz_bitsize(&(generators[g][c]));
+                if (b > gmax) gmax = b;
+            }
+        fprintf(stderr, "[LMUL] enter hnfmod_bits=%d gen_max_bit=%d (transient mul ~= 2*hnfmod = %d)\n",
+                ibz_bitsize(&hnfmod), gmax, 2 * ibz_bitsize(&hnfmod));
+        fflush(stderr);
+    }
+    /* paper Issue 11/12 spec: when HNF mod core's m^2 transient would exceed
+     * the IBZ_BITS cap, fall through to the spec-faithful "form bar(J_t)·I
+     * product, run LLL directly on its 16 column generators" path via
+     * ML2(d=16). This matches paper §SuitableIdeals "form ideal product,
+     * compute Gram, run LLL" without the canonical-HNF cofactor expansion.
+     *
+     * At 110-limb (IBZ_BITS=7040), HNF's ~2*hnfmod transient stays well under
+     * the cap and HNF is faster + paper-strict for that path — we keep it.
+     * At 28-limb (IBZ_BITS=1792), hnfmod ~ 1000 bit yields ~2000 bit transient
+     * > cap → silent overflow → hang; route via ML2 instead. ML2(d=16) at
+     * 110-limb had a known regression (oscillation in dpe precision), so we
+     * only invoke it when forced by the cap. */
+    {
+        int hnfmod_bits = ibz_bitsize(&hnfmod);
+        int safety_margin = 64; /* conservative; xgcd produces u,v slightly larger than m/d */
+        int use_ml2 = (2 * hnfmod_bits + safety_margin) > IBZ_BITS;
+        if (use_ml2) {
+            ibz_vec_4_t reduced[4];
+            for (int i = 0; i < 4; i++)
+                ibz_vec_4_init(&reduced[i]);
+            int rho = quat_ml2(reduced, 4, generators, 16, alg);
+            if (rho >= 4) {
+                for (int j = 0; j < 4; j++)
+                    for (int i = 0; i < 4; i++)
+                        ibz_copy(&(res->basis[i][j]), &reduced[j][i]);
+                fprintf(stderr, "[LMUL] ML2(d=16) ok, rho=%d (forced: 2*hnfmod=%d > IBZ_BITS=%d)\n",
+                        rho, 2 * hnfmod_bits, IBZ_BITS);
+                fflush(stderr);
+            } else {
+                static int _lmul_fb_n = 0;
+                if (_lmul_fb_n++ < 3)
+                    fprintf(stderr, "[LMUL] ML2(d=16) abort, HNF fallback (%d)\n", _lmul_fb_n);
+                fflush(stderr);
+                ibz_mat_4xn_hnf_mod_core(&(res->basis), 16, generators, &hnfmod);
+            }
+            for (int i = 0; i < 4; i++)
+                ibz_vec_4_finalize(&reduced[i]);
+        } else {
+            ibz_mat_4xn_hnf_mod_core(&(res->basis), 16, generators, &hnfmod);
+        }
+    }
+    fprintf(stderr, "[LMUL] reduce returned\n"); fflush(stderr);
     ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
     quat_lattice_reduce_denom(res, res);
     ibz_vec_4_finalize(&elem1);

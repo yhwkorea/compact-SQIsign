@@ -25,7 +25,10 @@
 #include "dpe.h"
 
 #ifndef ML2_MAX_D
-#define ML2_MAX_D 8
+/* d=16 needed for paper Issue 11/12 spec-faithful quat_lideal_lideal_mul_reduced:
+ * the bar(J_t)·I product yields 16 column generators that we LLL directly
+ * (avoids hnf_mod_core's m^2 transient blow-up at 28-limb). */
+#define ML2_MAX_D 16
 #endif
 
 #define SYM_LOWER(M, i, j) ((i) >= (j) ? &(M)[i][j] : &(M)[j][i])
