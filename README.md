@@ -146,13 +146,14 @@ To revert, restore the `.bak110` precomp and the `110` line in `intbig.h`.
 | 2    | PASS     | PASS    | needs `f4ef487` DPE bound fix (the `bound_parallelogram_dpe` path); was a 28-limb regression before that |
 | 3    | (was HANG, recheck) | **PASS** | 28-limb fixed by `0195e54`; 110-limb hang at LMUL `post_LLL` in `quat_lideal_lideal_mul_reduced` was a separate pre-existing path — recheck at this HEAD |
 | 4    | PASS     | **PASS** | 28-limb fixed by `0195e54` (HNF mod core 2×hnfmod transient overflow bypassed via ML2(d=16) on `bar(I)·J` generators) |
-| 5    | **HANG (new)** | PASS | 110-limb [INV4x4]-loop hang first observed at `0195e54` HEAD; unrelated to 28-limb work — follow-up |
+| 5    | **PASS but slow (~6 min)** | PASS | 110-limb perf regression vs prior 140s, but completes with EXIT=0 and `[VERIFY] enter` trace reached. `0195e54` commit body called this an "[INV4x4]-loop hang", but a 6-min timeout shows it is a perf regression, not a hang — follow-up |
 | 6    | PASS     | **PASS** | same pattern as seed=4, same fix |
 
 In short: **all six seeds 1..6 pass at 28-limb** as of `0195e54`, validating
 the paper §5.2 "1774 bit / 28 limbs" claim for lvl1. The remaining open items
-are on the 110-limb side: seed=5 has a newly-observed `[INV4x4]`-loop hang at
-this HEAD, and seed=3's pre-existing `[LMUL] post_LLL` hang should be rechecked.
+are on the 110-limb side: seed=5 shows a perf regression (140 s → ~6 min, but
+not a hang — the run completes with `EXIT=0`), and seed=3's pre-existing
+`[LMUL] post_LLL` hang should be rechecked.
 
 ### Reading the bit-size traces
 

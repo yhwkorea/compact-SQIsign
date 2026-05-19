@@ -1,12 +1,12 @@
 # compact-SQIsign HANDOFF — 다음 세션 진입점
 
-마지막 갱신: 2026-05-19 PM 3회차 (main HEAD `e6f65a7`).
+마지막 갱신: 2026-05-20 00:05 (main HEAD `e6f65a7` + 2026-05-19 23:53 측정 결과 반영).
 
 ## 한 줄 상태
 
-lvl1 28-limb sign+verify는 **seed=1..6 ALL PASS** (commit `0195e54` conditional ML2(d=16) path가 seed=3, 4, 6의 28-limb hang 해결). paper §5.2 "1774 bit / 28 limbs" 주장 **lvl1 검증 완료**. 110-limb은 **seed=5 [INV4x4]-loop hang 잔존** (0195e54 HEAD 시점, 28-limb 작업과 별개 hot path).
+lvl1 28-limb sign+verify는 **seed=1..6 ALL PASS** (commit `0195e54` conditional ML2(d=16) path가 seed=3, 4, 6의 28-limb hang 해결). paper §5.2 "1774 bit / 28 limbs" 주장 **lvl1 검증 완료**. 110-limb seed=5는 **hang 아님 — perf regression (cb8281b 140s → 0195e54+ ~6분 verify까지 도달, EXIT=0 PASS 확인)**. `0195e54` commit body의 "[INV4x4]-loop hang"은 측정 timeout 짧아서 hang으로 오인했던 표현.
 
-다음 세션 핵심 과제: 110-limb seed=5 [INV4x4]-loop hang 진단. 그 다음 lvl3 (43 limbs) / lvl5 (56 limbs) paper-claim 검증.
+다음 세션 핵심 과제: 110-limb seed=5 **perf regression** bisect (`f4ef487` ~ `0195e54` 어디 commit이 140s → ~6분 만드는지). 그 다음 lvl3 (43 limbs) / lvl5 (56 limbs) paper-claim 검증.
 
 ---
 
@@ -86,7 +86,7 @@ SIGN_FUNCTION_PLAN.md / README.md / 본 HANDOFF.md 갱신. 측정 결과 반영.
 
 ---
 
-## 2. 현재 28-limb seed 커버리지 (lvl1, seed=1..6 × 1 iter, `0195e54` HEAD 시점)
+## 2. 현재 28-limb seed 커버리지 (lvl1, seed=1..6 × 1 iter, `e6f65a7` HEAD 시점)
 
 | seed | 110-limb | 28-limb | 비고 |
 |------|----------|---------|------|
@@ -94,10 +94,10 @@ SIGN_FUNCTION_PLAN.md / README.md / 본 HANDOFF.md 갱신. 측정 결과 반영.
 | 2    | PASS 136s | PASS 47s | `f4ef487` DPE fix로 통과 |
 | 3    | (이전 HANG, 재측정 필요) | **PASS** | `0195e54` conditional ML2(d=16) path로 28-limb hang 해결. 110-limb은 별개 `quat_lideal_lideal_mul_reduced` 영역 hang 잔존 가능 — 재측정으로 확인 필요 |
 | 4    | PASS 142s | **PASS** | `0195e54` fix. `ibz_mat_4xn_hnf_mod_core` 2×hnfmod transient overflow를 ML2(d=16)로 우회 |
-| **5** | **HANG (신규)** | PASS 69s | `0195e54` HEAD부터 110-limb [INV4x4]-loop hang 측정됨. 28-limb 작업과 별개 path — follow-up |
+| 5    | **PASS but slow** (~6분, was 140s, 측정 2026-05-19 23:53) | PASS 69s | 110-limb perf regression. trace에 `[VERIFY] enter`까지 도달 후 EXIT=0. `LMUL` 150회 / `IMLLL` 36회 / `RESP` 6회. `0195e54` commit body의 "[INV4x4]-loop hang" 표현은 측정 timeout 짧아서 hang으로 오인 — 실제는 perf regression. |
 | 6    | PASS | **PASS** | seed=4와 동일 패턴, 동일 fix |
 
-**28-limb seeds 1..6 ALL PASS** — paper §5.2 "1774 bit / 28 limbs" lvl1 검증 완료. 110-limb은 seed=5 (신규 hang), seed=3 (재측정 필요) follow-up.
+**28-limb seeds 1..6 ALL PASS** — paper §5.2 "1774 bit / 28 limbs" lvl1 검증 완료. 110-limb은 seed=5 perf regression (hang 아님), seed=3 (재측정 필요) follow-up.
 
 ### seed=1 측정 peaks (참고, 통과 케이스)
 
@@ -118,13 +118,27 @@ SIGN_FUNCTION_PLAN.md / README.md / 본 HANDOFF.md 갱신. 측정 결과 반영.
 
 ## 3. 다음 작업 후보 (우선순위 순)
 
-### 3.1 ★ ★ ★ 110-limb seed=5 [INV4x4]-loop hang 진단 (top priority)
+### 3.1 ★ ★ 110-limb seed=5 perf regression bisect (top priority)
 
-**상태**: `0195e54` HEAD 시점부터 lvl1 110-limb seed=5가 [INV4x4] hot path에서 hang. `0195e54` commit body의 "Known issue ... separate (unrelated) [INV4x4]-loop hang at this HEAD — needs follow-up".
+**상태**: 2026-05-19 23:53 측정 — `e6f65a7` HEAD에서 lvl1 110-limb seed=5 sign+verify EXIT=0 (`[VERIFY] enter` trace까지 도달), 그러나 cb8281b 시점 140s에서 `~6분`으로 약 3배 perf regression. **hang 아님**.
 
-**가설**: `0195e54`가 손댄 곳은 `quat_lattice_mul`의 conditional path뿐이고 110-limb은 HNF 유지. 그러나 `ML2_MAX_D 8→16` 변경 또는 `e6f65a7` restore 과정에서 어떤 종속이 미세하게 영향받았을 가능성 — 우선 이전 commit (`f4ef487`) 시점의 110-limb seed=5와 동일 trace 비교해 변화 지점 식별.
+**측정 trace 패턴** (`_seed5.err` 547 line, 2026-05-19 23:53 ~ 2026-05-20 00:04):
+- `[ALGNORM-MOD]` / `[NRD-N2]` / `[ALGMUL-MOD]` → `[ML2 #0..2]` → `[LATTICE-ADD]` 5번 → `[PNRE]` 6번 → `[LIDEAL-MUL]` 10번 → `[LMUL]` 150번 → `[IMLLL]` 36번 → `[RESP]` 6번 → `[EVAL-AUX]` 4번 (found=1) → `[DIM2-CHL]` 1번 → `[BASIS-CHG]` 1번 → `[VERIFY]` enter
+- `[LMUL]` post_norm prod.norm=248~250, post_reduce_basis red[0][0]=187/188/183 — basis sizes 정상 범위
+- 작은 `[INV4x4] mat_max=2 minor_max=3` 다수 = `quat_lattice_contains` assertion path의 EXTREMAL_ORDERS 검증, 정상
 
-**디버그 진입점**: `src/quaternion/ref/generic/dim4.c`의 `ibz_mat_4x4_inv_with_det_as_denom` (lat_ball.c에서 호출되는 4×4 inverse). `[INV4x4]` trace tag 그대로 사용. seed=5 stderr 캡쳐 + 마지막 4..5 trace line 비교.
+**bisect 후보 commits** (cb8281b 140s → e6f65a7 ~6분 사이):
+- `f4ef487` (DPE bound, lat_ball.c): 28-limb 경로지만 110-limb에서도 일부 호출 가능
+- `5ff147b` (paper Issue 8 ext + Issue 9 generalized): `quat_lattice_alg_elem_mul`을 ML2(d=4) 교체. 110-limb path 영향 가능
+- `0195e54` (conditional ML2(d=16) + ML2_MAX_D 8→16): 110-limb은 conditional 조건 미충족이지만 ML2_MAX_D 상승이 static array 크기 영향
+- `e6f65a7` (l2.c 신규 + 390 files restore): `quat_lll_core`가 별도 dpe 구현으로 추가됨 — 이전 시점에 이 함수가 어디 정의됐는지 확인 필요
+
+**진단 procedure**:
+1. `git checkout cb8281b && rebuild && ./test --seed=5` → 140s 재현 여부 확인
+2. 그 다음 commit별 (96a219c → bbfcd58 → 4ace82c → ... → e6f65a7) sequential bisect
+3. perf regression 도입 commit을 찾으면 trace diff로 어느 hot path가 N배 느려졌는지 식별 (LMUL? IMLLL? ML2?)
+
+**디버그 진입점**: trace tag 그대로 사용. LMUL/IMLLL 호출 횟수 + 평균 시간으로 bottleneck 식별.
 
 ### 3.2 lvl3 / lvl5 paper-claim 검증 (∮ 3.1 해결 후)
 
