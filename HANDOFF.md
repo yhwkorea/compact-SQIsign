@@ -1,12 +1,19 @@
 # compact-SQIsign HANDOFF — 다음 세션 진입점
 
-마지막 갱신: 2026-05-20 00:05 (main HEAD `e6f65a7` + 2026-05-19 23:53 측정 결과 반영).
+마지막 갱신: 2026-05-20 00:55 (main HEAD `1dbbd96` + paper-claim 3-level 검증 완료).
 
 ## 한 줄 상태
 
-lvl1 28-limb sign+verify는 **seed=1..6 ALL PASS** (commit `0195e54` conditional ML2(d=16) path가 seed=3, 4, 6의 28-limb hang 해결). paper §5.2 "1774 bit / 28 limbs" 주장 **lvl1 검증 완료**. 110-limb seed=5는 **hang 아님 — perf regression (cb8281b 140s → 0195e54+ ~6분 verify까지 도달, EXIT=0 PASS 확인)**. `0195e54` commit body의 "[INV4x4]-loop hang"은 측정 timeout 짧아서 hang으로 오인했던 표현.
+**paper §5.2 3-level limb-count claim 모두 strict PASS** (22 seeds 총):
+- lvl1 28-limb (was 110): **14 / 14** seeds (1, 2, 3, 4, 5, 6, 7, 11, 23, 42, 100, 200, 333, 777) PASS
+- lvl3 43-limb (was 168): **4 / 4** seeds (1, 2, 3, 4) PASS, per-run ~6–7 min
+- lvl5 56-limb (was 222): **4 / 4** seeds (1, 2, 3, 4) PASS, per-run ~8–15 min
 
-다음 세션 핵심 과제: 110-limb seed=5 **perf regression** bisect (`f4ef487` ~ `0195e54` 어디 commit이 140s → ~6분 만드는지). 그 다음 lvl3 (43 limbs) / lvl5 (56 limbs) paper-claim 검증.
+"strict PASS" = EXIT=0 + `All tests passed!` + `verif failed` 메시지 부재 (`test_signature.c` 결함도 같이 fix).
+
+`intbig.h` default를 paper-claim (28/43/56)으로 끌어올림, precomp lvl1/3/5 데이터는 `_PR8_handoff/_precomp_resize.py`로 변환. KLKL25 baseline 110/168/222로 되돌리려면 본 commit revert 또는 README "Legacy 110/168/222-limb baseline" 절차.
+
+다음 세션 핵심 과제: 110-limb seed=5 **perf regression** bisect (별개 follow-up). 그 외에는 paper claim 메인 검증 종료.
 
 ---
 

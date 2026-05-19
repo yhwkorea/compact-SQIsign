@@ -100,11 +100,30 @@ except the KAT tests. To override the default timeout, run
 ## Paper-bound verification (this fork)
 
 This fork resolves the quaternion-side bound issues so that
-`IBZ_LIMBS_lvl1 = 28` matches paper §5.2's "1774 bit / 28 limbs" claim. See
-[`SIGN_FUNCTION_PLAN.md`](SIGN_FUNCTION_PLAN.md), [`BUGS_AND_DECISIONS.md`](BUGS_AND_DECISIONS.md),
-and [`PAPER_BOUND_PLAN.md`](PAPER_BOUND_PLAN.md) for the gap-by-gap history.
+`IBZ_LIMBS_lvl{1,3,5} = {28, 43, 56}` match paper §5.2's
+"1774 / 2696 / 3555 bit" claims. These are now the **default** values in
+`intbig.h` (was `{110, 168, 222}`); the precomp tables in
+`src/precomp/ref/lvl{1,3,5}/quaternion_data.c` were resized via
+`_PR8_handoff/_precomp_resize.py`. See [`SIGN_FUNCTION_PLAN.md`](SIGN_FUNCTION_PLAN.md),
+[`BUGS_AND_DECISIONS.md`](BUGS_AND_DECISIONS.md), and
+[`PAPER_BOUND_PLAN.md`](PAPER_BOUND_PLAN.md) for the gap-by-gap history.
 
-### Default (110-limb baseline)
+As of 2026-05-20, **all three NIST levels pass `KeyGen + Sign + Verify`**
+across the seeds listed below. "PASS" here is the strict definition:
+`EXIT=0`, `All tests passed!` in stdout, **and** no `verif failed` message
+anywhere in stdout. (Prior to the `test_signature.c` fix in this commit,
+`All tests passed!` would print even on `verify_failed`; that bug is also
+fixed here so the exit code now reflects the verify outcome.)
+
+| level | limbs (was) | seeds tested | PASS / total | per-run wallclock |
+|---|---|---|---|---|
+| lvl1 | 28 (was 110) | 1, 2, 3, 4, 5, 6, 7, 11, 23, 42, 100, 200, 333, 777 | **14 / 14** | ~30 s – 4 min |
+| lvl3 | 43 (was 168) | 1, 2, 3, 4 | **4 / 4** | ~6 – 7 min |
+| lvl5 | 56 (was 222) | 1, 2, 3, 4 | **4 / 4** | ~8 – 15 min |
+
+**Total: 22 / 22 strict PASS** spanning all three NIST levels.
+
+### Legacy 110/168/222-limb baseline (KLKL25 sizing)
 
 ```bash
 mkdir -p build && cd build

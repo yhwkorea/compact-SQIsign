@@ -34,6 +34,7 @@ test_sqisign(int repeat)
         int check = protocols_verify(&sig, &pk, msg, 32);
         if (!check) {
             printf("verif failed ! \n");
+            res = 0;
         }
         printf("-----verif done------\n");
     }

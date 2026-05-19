@@ -29,9 +29,9 @@ extern "C"
 #define _IBZ_CONCAT(a, b) a##b
 #define _IBZ_CONCAT2(a, b) _IBZ_CONCAT(a, b)
 
-#define IBZ_LIMBS_lvl1 110  /* NIST Level I */
-#define IBZ_LIMBS_lvl3 168  /* NIST Level III */
-#define IBZ_LIMBS_lvl5 222  /* NIST Level V */
+#define IBZ_LIMBS_lvl1 28  /* NIST Level I */
+#define IBZ_LIMBS_lvl3 43  /* NIST Level III */
+#define IBZ_LIMBS_lvl5 56  /* NIST Level V */
 
 #ifdef SQISIGN_VARIANT
 #define IBZ_LIMBS _IBZ_CONCAT2(IBZ_LIMBS_, SQISIGN_VARIANT)
