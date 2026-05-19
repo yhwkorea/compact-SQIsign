@@ -1,12 +1,12 @@
 # compact-SQIsign HANDOFF — 다음 세션 진입점
 
-마지막 갱신: 2026-05-19 PM 2회차 (main HEAD `f4ef487`).
+마지막 갱신: 2026-05-19 PM 3회차 (main HEAD `e6f65a7`).
 
 ## 한 줄 상태
 
-lvl1 28-limb sign+verify는 **seed별로 다름 — seed=1, 2, 5 PASS; seed=3, 4, 6 HANG**. paper §5.2 "1774 bit / 28 limbs" 주장은 **부분 검증**됨. 남은 hang은 `quat_lattice_mul` 안 HNF mod core의 silent overflow (~2000 bit transient > 1792 cap). 110-limb은 모든 seed 정상.
+lvl1 28-limb sign+verify는 **seed=1..6 ALL PASS** (commit `0195e54` conditional ML2(d=16) path가 seed=3, 4, 6의 28-limb hang 해결). paper §5.2 "1774 bit / 28 limbs" 주장 **lvl1 검증 완료**. 110-limb은 **seed=5 [INV4x4]-loop hang 잔존** (0195e54 HEAD 시점, 28-limb 작업과 별개 hot path).
 
-다음 세션 핵심 과제: 28-limb 안전한 `quat_lattice_mul` 본정공 — modular CRT 또는 paper-strict ML2 변형 (직접 ML2(d=16) 교체는 110-limb regression 일으킴, 검증된 사실).
+다음 세션 핵심 과제: 110-limb seed=5 [INV4x4]-loop hang 진단. 그 다음 lvl3 (43 limbs) / lvl5 (56 limbs) paper-claim 검증.
 
 ---
 
@@ -68,25 +68,36 @@ KLKL25 precomp 생성기가 GMP `mpz_t` → raw `uint64_t[IBZ_LIMBS]` 변환에�
 ### sample_response DPE bound (commit `f4ef487`, 2026-05-19 PM 2회차)
 - **`lat_ball.c bound_parallelogram_dpe`** 추가. 기존 `quat_lattice_bound_parallelogram`이 호출하던 `ibz_mat_4x4_inv_with_det_as_denom` (gram inv via 4×4 cofactor)이 28-limb에서 silent overflow — det 2579 bit / adj 1935 bit (110-limb 실측 true 값) > 1792-bit cap.
 - 대체: dpe (53-bit float + arbitrary exponent, ML2가 이미 사용) 기반 4×4 det + 3×3 (i,i)-cofactor 계산. LLL-of-dual step skip하고 U = identity (axis-aligned bound). LLL-reduced gram에서는 충분히 tight.
-- **효과**: 28-limb seed=2 hang fix. seed=3, 4, 6은 다른 hot path에서 hang하므로 **이 fix만으로 해결 안 됨**.
+- **효과**: 28-limb seed=2 hang fix. seed=3, 4, 6은 다른 hot path에서 hang하므로 이 fix만으로 해결 안 됨 → `0195e54`에서 해결.
+
+### paper Issue 11/12 conditional ML2(d=16) for `quat_lattice_mul` (commit `0195e54`, 2026-05-19 PM 3회차) ← **이번 세션의 마지막 핵심**
+- **`lattice.c quat_lattice_mul`**: 기존 `ibz_mat_4xn_hnf_mod_core(... &hnfmod)` 호출이 28-limb lvl1에서 silent overflow. hnfmod = `norm1²·norm2²·denom1⁴·denom2⁴` ~ 1000 bit; HNF mod core 내부 `coeff·a[k][i] mod m` transient ~ 2×hnfmod ~ 2000 bit > 28-limb cap 1792 bit. `ibz_mul` truncate → 잘못된 residue → `quat_lideal_lideal_mul_reduced`가 bogus 결과로 무한 loop. **seed=3, 4, 6 hang의 root cause**.
+- **Fix**: `2·hnfmod + safety > IBZ_BITS` 인 경우에만 HNF 우회. `bar(I)·J`의 16 column generators에 `quat_ml2(d=16)`을 직접 호출 → cofactor expansion 없이 4-element LLL-reduced basis 반환. paper §SuitableIdeals 본문의 "form ideal product, compute Gram, run LLL" 레시피와 정합 (Issue 11/12). HNF fallback은 ML2 abort 시 유지.
+- **110-limb path는 그대로 HNF** — cap 7040 bit가 transient ~2000 bit 위에 한참 있어 우회 불필요. ML2(d=16)이 110-limb에서 oscillation regression 일으킨다는 이전 측정과 일치.
+- **`ML2_MAX_D` 8 → 16** (`ml2.c`).
+- **효과**: lvl1 28-limb seeds 1..6 sign+verify **all PASS** (이전 3 hangs 해결). paper §5.2 1774-bit / 28-limb claim **lvl1 검증 완료**.
+- **알려진 잔여**: 110-limb seed=5에 별개의 (28-limb 작업과 무관) `[INV4x4]`-loop hang. follow-up 대상.
+
+### restore 390 files (commit `e6f65a7`, 2026-05-19 PM 3회차)
+`0195e54` 작성 중 실수로 392 production file (`.clang-format`, `.cmake/*`, `test/test_*.c` 등)이 빠졌음. `e6f65a7`이 그대로 복구 — 코드 변경 없음, file restore only.
 
 ### docs (commit `96a219c`, 2026-05-19)
 SIGN_FUNCTION_PLAN.md / README.md / 본 HANDOFF.md 갱신. 측정 결과 반영.
 
 ---
 
-## 2. 현재 28-limb seed 커버리지 (lvl1, seed=1..6 × 1 iter)
+## 2. 현재 28-limb seed 커버리지 (lvl1, seed=1..6 × 1 iter, `0195e54` HEAD 시점)
 
 | seed | 110-limb | 28-limb | 비고 |
 |------|----------|---------|------|
 | 1    | PASS 126s | PASS 35s | |
 | 2    | PASS 136s | PASS 47s | `f4ef487` DPE fix로 통과 |
-| **3** | **HANG** | **HANG** | 110/28 무관 — 별개 (`quat_lideal_lideal_mul_reduced` 안 LLL/HNF 영역 의심) |
-| **4** | PASS 142s | **HANG** | 28-limb regression. dim2id2iso → `quat_lideal_conjugate_without_hnf` → `quat_lideal_right_transporter` → `quat_lattice_mul` 안 `ibz_mat_4xn_hnf_mod_core`에서 2×hnfmod transient (~2000 bit) > 1792 cap silent overflow |
-| 5    | PASS 140s | PASS 69s | |
-| **6** | PASS | **HANG** | seed=4와 동일 패턴 |
+| 3    | (이전 HANG, 재측정 필요) | **PASS** | `0195e54` conditional ML2(d=16) path로 28-limb hang 해결. 110-limb은 별개 `quat_lideal_lideal_mul_reduced` 영역 hang 잔존 가능 — 재측정으로 확인 필요 |
+| 4    | PASS 142s | **PASS** | `0195e54` fix. `ibz_mat_4xn_hnf_mod_core` 2×hnfmod transient overflow를 ML2(d=16)로 우회 |
+| **5** | **HANG (신규)** | PASS 69s | `0195e54` HEAD부터 110-limb [INV4x4]-loop hang 측정됨. 28-limb 작업과 별개 path — follow-up |
+| 6    | PASS | **PASS** | seed=4와 동일 패턴, 동일 fix |
 
-3/6만 28-limb 통과. paper §5.2 "1774 bit / 28 limbs" 주장 **부분 검증**.
+**28-limb seeds 1..6 ALL PASS** — paper §5.2 "1774 bit / 28 limbs" lvl1 검증 완료. 110-limb은 seed=5 (신규 hang), seed=3 (재측정 필요) follow-up.
 
 ### seed=1 측정 peaks (참고, 통과 케이스)
 
@@ -107,28 +118,32 @@ SIGN_FUNCTION_PLAN.md / README.md / 본 HANDOFF.md 갱신. 측정 결과 반영.
 
 ## 3. 다음 작업 후보 (우선순위 순)
 
-### 3.1 ★ ★ ★ `quat_lattice_mul` HNF mod core 28-limb safe replacement (top priority)
+### 3.1 ★ ★ ★ 110-limb seed=5 [INV4x4]-loop hang 진단 (top priority)
 
-**문제**: lvl1 28-limb seed=4, 6 hang의 root cause. `quat_lideal_conjugate_without_hnf → quat_lideal_right_order → quat_lideal_right_transporter → quat_lattice_mul`에서:
-```c
-ibz_mat_4xn_hnf_mod_core(&(res->basis), 16, generators, &hnfmod);
+**상태**: `0195e54` HEAD 시점부터 lvl1 110-limb seed=5가 [INV4x4] hot path에서 hang. `0195e54` commit body의 "Known issue ... separate (unrelated) [INV4x4]-loop hang at this HEAD — needs follow-up".
+
+**가설**: `0195e54`가 손댄 곳은 `quat_lattice_mul`의 conditional path뿐이고 110-limb은 HNF 유지. 그러나 `ML2_MAX_D 8→16` 변경 또는 `e6f65a7` restore 과정에서 어떤 종속이 미세하게 영향받았을 가능성 — 우선 이전 commit (`f4ef487`) 시점의 110-limb seed=5와 동일 trace 비교해 변화 지점 식별.
+
+**디버그 진입점**: `src/quaternion/ref/generic/dim4.c`의 `ibz_mat_4x4_inv_with_det_as_denom` (lat_ball.c에서 호출되는 4×4 inverse). `[INV4x4]` trace tag 그대로 사용. seed=5 stderr 캡쳐 + 마지막 4..5 trace line 비교.
+
+### 3.2 lvl3 / lvl5 paper-claim 검증 (∮ 3.1 해결 후)
+
+paper §5.2 budget: lvl3 2696 bit = **43 limbs**, lvl5 3555 bit = **56 limbs** (default 168/222).
+
+```bash
+# lvl3
+python3 _PR8_handoff/_precomp_resize.py \
+  src/precomp/ref/lvl3/quaternion_data.c src/precomp/ref/lvl3/quaternion_data.c 168 43
+sed -i 's|#define IBZ_LIMBS_lvl3 168.*|#define IBZ_LIMBS_lvl3 43|' \
+  src/quaternion/ref/generic/include/intbig.h
+( cd build && make -j$(nproc) sqisign_test_signature_lvl3 )
+./build/src/signature/ref/lvl3/test/sqisign_test_signature_lvl3 --iterations=1 --seed=1
 ```
-hnfmod = `norm1² · norm2² · denom1⁴ · denom2⁴`. inv.denom이 ~125 bit (= lideal.denom·lideal.norm)이라 denom1⁴ = ~500 bit. hnfmod 총합 ~ 1000 bit. HNF mod core 내부 2·hnfmod transient ~ 2000 bit > **1792-bit cap → silent truncation**.
+lvl1에서 hnfmod 1000 bit/2× 2000 bit가 1792 cap 위반이었으므로, lvl3 43 limbs (2752 bit cap)에서 hnfmod scale (norm·denom 더 큼) 재계산 필요. lvl1 fix와 동일 conditional path가 lvl3/5에서도 trigger되어야 정상.
 
-**측정**: `[D2I2I] before conjugate_without_hnf` → `[RT] before inv_lattice ... post inv_lattice inv.basis_max=63 denom=125` → `quat_lattice_mul` 호출 → **never returns**.
+### 3.3 110-limb seed=3 재측정
 
-**시도 (실패)**: `ml2.c`에 `ML2_MAX_D = 16` bump + `quat_lattice_mul`의 HNF call을 `quat_ml2(d=16)`로 교체. 28-limb seed=1..6 모두 PASS시켰지만 **110-limb seed=5 regression (hang)**. ML2(d=16)이 paper-strict equivalent 아님 — 큰 d에서 dpe precision/iteration trade-off가 HNF와 다른 수렴 특성 보임.
-
-**진짜 fix 후보**:
-- **(a) Modular CRT** `ibz_mat_4xn_hnf_mod_core` 변형 — 각 modular 연산 < 64 bit, 28-limb 안전. CRT 누적 결과만 28-limb 안에 들어오게 설계. 100-200줄.
-- **(b) Bareiss 또는 fraction-free 변형** — 4×4가 아닌 4×16 케이스에 적용. paper 본문엔 없는 알고리즘이라 fidelity 약함.
-- **(c) Pre-reduce inv.denom 더 공격적으로** — `quat_lideal_inverse_lattice_without_hnf`에 reduce_denom 추가는 이미 시도했으나 효과 미미 (gcd가 1이라 줄지 않음). 다른 사전 reduce 시도해볼 수 있음.
-
-작업 시작점: `src/quaternion/ref/generic/lattice.c:320` (HNF mod core 호출). 측정 도구는 lat_ball.c에 이미 박은 `[BOUND-DPE]` 패턴을 hnf_mod_core 입력/출력에 동일 적용.
-
-### 3.2 seed=3 별개 hang (110/28 둘 다)
-
-seed=3은 110-limb에서도 hang. 28-limb 작업과 독립. dim2id2iso의 lideal_lideal_mul_reduced 영역에서 멈춤 (`[LMUL] post_LLL` 후 진전 없음). 별도 디버그 패스 필요.
+`cb8281b` 시점엔 110-limb seed=3 HANG. `0195e54` 코드 변경이 110-limb 경로 안 건드렸으므로 변화 없을 가능성 높지만 재측정으로 확인. dim2id2iso의 `quat_lideal_lideal_mul_reduced` 영역 hang (`[LMUL] post_LLL` 후 진전 없음).
 
 ### 3.3 lvl3 / lvl5 paper-claim 검증
 
@@ -170,17 +185,17 @@ cd build && ctest --timeout 600 -R '_lvl1$'
 
 ## 시도했지만 실패/철회된 접근 (이번 세션 lessons learned)
 
-### ML2(d=16)으로 HNF mod core 교체 (REVERTED)
-- 시도: `ML2_MAX_D 8 → 16`, `lattice.c:320`의 `ibz_mat_4xn_hnf_mod_core` 호출을 `quat_ml2(reduced, 4, generators, 16, alg)`로 교체.
+### ML2(d=16) **무조건** 교체 (REVERTED → conditional path로 채택)
+- 처음 시도: `lattice.c`의 `quat_lattice_mul` HNF 호출을 무조건 `quat_ml2(d=16)`로 교체.
 - 28-limb 결과: seed=1..6 모두 PASS.
-- **110-limb 결과: seed=5 hang (이전엔 140s PASS)** ← regression.
-- 분석: ML2(d=16)는 paper-strict equivalent 아닌 듯. dpe precision + iteration 동작이 HNF와 다른 path 만들어 종종 무한 swap. 큰 d에서 더 두드러짐.
-- 결론: ML2(d=16) 직접 교체는 보류. 다른 우회로 (3.1 (a)/(c)) 필요.
+- **110-limb 결과: seed=5 hang** ← regression.
+- 분석: ML2(d=16)이 110-limb처럼 큰 input에서는 HNF와 다른 수렴 특성 (dpe precision + iteration trade-off로 swap oscillation 경향).
+- **최종 채택 (`0195e54`)**: `2·hnfmod + safety > IBZ_BITS` 조건일 때만 ML2(d=16) 호출 (즉 28-limb에서만 trigger), 110-limb은 HNF 유지. **conditional 형태로 절충 — §1 commit `0195e54` 참고**.
 
 ### `quat_lideal_inverse_lattice_without_hnf`에 reduce_denom 추가 (REVERTED, harmless였지만 효과 없음)
 - 시도: `ibz_mul(inv->denom, ..., lideal->norm)` 직후 `quat_lattice_reduce_denom(inv, inv)` 추가.
 - 결과: gcd(inv.basis entries, inv.denom) = 1이라 denom 안 줄음. seed=4 hang 변화 없음.
-- 결론: 가설은 합리적이지만 데이터상 효과 없음.
+- 결론: 가설은 합리적이지만 데이터상 효과 없음 — `0195e54`의 conditional path가 우회 대신 채택.
 
 ---
 

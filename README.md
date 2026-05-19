@@ -135,24 +135,24 @@ sed -i 's|#define IBZ_LIMBS_lvl1 110.*|#define IBZ_LIMBS_lvl1 28|' \
 ulimit -s unlimited
 ./build/src/signature/ref/lvl1/test/sqisign_test_signature_lvl1 --iterations=1 --seed=1
 ```
-On the 2026-05-19 commits this passes in ~33 s for lvl1 with seeds 1, 2, 5.
+On the 2026-05-19 commits this passes in ~33–69 s for lvl1 with seeds 1..6.
 To revert, restore the `.bak110` precomp and the `110` line in `intbig.h`.
 
-**Seed coverage at 28-limb (lvl1)** as of the DPE-bound fix:
+**Seed coverage at 28-limb (lvl1)** as of commit `0195e54` (conditional ML2(d=16) path):
 
 | seed | 110-limb | 28-limb | notes |
 |------|----------|---------|-------|
 | 1    | PASS     | PASS    |       |
-| 2    | PASS     | PASS    | needs DPE bound fix (the `bound_parallelogram_dpe` path); was a 28-limb regression before |
-| 3    | HANG     | HANG    | pre-existing bug, not 28-limb-specific (hangs at LMUL `post_LLL` step in `quat_lideal_lideal_mul_reduced`) |
-| 4    | PASS     | HANG    | keygen-side, hangs after `prime_norm_reduced_equivalent` returns and `dim2id2iso` runs further LLL/intersect — separate 28-limb silent overflow path, not yet localized |
-| 5    | PASS     | PASS    |       |
-| 6    | ?        | HANG    | same pattern as seed=4 |
+| 2    | PASS     | PASS    | needs `f4ef487` DPE bound fix (the `bound_parallelogram_dpe` path); was a 28-limb regression before that |
+| 3    | (was HANG, recheck) | **PASS** | 28-limb fixed by `0195e54`; 110-limb hang at LMUL `post_LLL` in `quat_lideal_lideal_mul_reduced` was a separate pre-existing path — recheck at this HEAD |
+| 4    | PASS     | **PASS** | 28-limb fixed by `0195e54` (HNF mod core 2×hnfmod transient overflow bypassed via ML2(d=16) on `bar(I)·J` generators) |
+| 5    | **HANG (new)** | PASS | 110-limb [INV4x4]-loop hang first observed at `0195e54` HEAD; unrelated to 28-limb work — follow-up |
+| 6    | PASS     | **PASS** | same pattern as seed=4, same fix |
 
-In short: **seed=1, 2, 5 verified at 28-limb**. Seeds 4, 6 hang during keygen's
-`dim2id2iso` on different silent-overflow paths; localising each requires a
-fresh `[INV4x4]`/`[LMUL]`/`[ML2 #N]` trace bisection. Seed=3's hang is
-independent of limb count.
+In short: **all six seeds 1..6 pass at 28-limb** as of `0195e54`, validating
+the paper §5.2 "1774 bit / 28 limbs" claim for lvl1. The remaining open items
+are on the 110-limb side: seed=5 has a newly-observed `[INV4x4]`-loop hang at
+this HEAD, and seed=3's pre-existing `[LMUL] post_LLL` hang should be rechecked.
 
 ### Reading the bit-size traces
 

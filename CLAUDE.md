@@ -6,6 +6,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SQIsign is a C implementation of the SQIsign post-quantum digital signature scheme. The codebase is organized into modular sub-libraries that implement various cryptographic primitives, culminating in the final SQIsign signature and verification protocols.
 
+## Remote / Source of Truth
+
+**GitHub**: https://github.com/yhwkorea/compact-SQIsign
+
+작업을 시작하거나 "마지막 작업 / 최근 commit / 반영 상태" 같은 질문을 받으면 **반드시 GitHub 원격을 먼저 확인**한다. 로컬 `git status` 가 "up to date"여도 fetch 안 한 상태면 stale이므로 의미 없음. 절차:
+
+```bash
+git fetch origin
+git log --oneline HEAD..origin/main   # 들어올 commit 확인
+# 또는 GitHub API:
+"/c/Program Files/GitHub CLI/gh.exe" api repos/yhwkorea/compact-SQIsign/commits -q '.[0:15] | .[] | "\(.sha[0:7]) \(.commit.author.date) \(.commit.message | split("\n")[0])"'
+```
+
+로컬 git log 만 보고 "이게 마지막 작업"이라고 단정 금지.
+
 ## Build Commands
 
 ### Basic Build
