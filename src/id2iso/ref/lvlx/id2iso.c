@@ -254,7 +254,9 @@ id2iso_kernel_dlogs_to_ideal_even(quat_left_ideal_t *lideal, const ibz_vec_2_t *
     ibz_add(&gen.coord[0], &gen.coord[0], &vec[1]);
     ibz_vec_2_finalize(&vec);
 
-    quat_lideal_create(lideal, &gen, &two_pow, &MAXORD_O0, &QUATALG_PINFTY);
+    /* paper Issue 9: norm known to be two_pow; skip quat_alg_norm(gen)
+     * transient (was 1979 bit at lvl1 for 865-bit gen.coord). */
+    quat_lideal_create_with_norm(lideal, &gen, &two_pow, &MAXORD_O0, &QUATALG_PINFTY);
 
     assert(0 == ibz_cmp(&lideal->norm, &two_pow));
 

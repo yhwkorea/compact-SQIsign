@@ -8,6 +8,69 @@
  * @brief Functions related to norm equation solving or special extremal orders
  */
 
+/* paper Issue 14: check N^2 | nrd(x), with precondition N | nrd(x).
+ * Returns 1 iff N^2 | nrd(x), 0 otherwise.
+ * Implementation: nrd = N*Q + R where for each i,
+ *   x[i]^2 = q[i]*N + r[i], Q = q[0]+q[1]+p*(q[2]+q[3]),
+ *   R = r[0]+r[1]+p*(r[2]+r[3]). Since N | nrd and N | N*Q, also N | R.
+ * Then nrd/N = Q + R/N, and (nrd/N) mod N == 0 iff N^2 | nrd.
+ * Max ibz_mul transient: x[i]^2 = 2*log2(N) bit. Under paper Lemma 4N^2. */
+static int
+quat_alg_nrd_N2_divides(const quat_alg_elem_t *x, const ibz_t *N, const quat_alg_t *alg)
+{
+    int result;
+    ibz_t q[4], r[4], sq, acc, tmp, R_div_N, rem;
+    for (int i = 0; i < 4; i++) {
+        ibz_init(&q[i]);
+        ibz_init(&r[i]);
+    }
+    ibz_init(&sq);
+    ibz_init(&acc);
+    ibz_init(&tmp);
+    ibz_init(&R_div_N);
+    ibz_init(&rem);
+
+    for (int i = 0; i < 4; i++) {
+        ibz_mul(&sq, &(x->coord[i]), &(x->coord[i]));   /* 2*log2(N) bit transient */
+        ibz_div(&q[i], &r[i], &sq, N);                  /* q[i], r[i] < N */
+    }
+
+    /* Q = q[0] + q[1] + p*(q[2] + q[3]) */
+    ibz_add(&acc, &q[0], &q[1]);
+    ibz_add(&tmp, &q[2], &q[3]);
+    ibz_mul(&tmp, &tmp, &(alg->p));                     /* p_bits + log2(N) bit */
+    ibz_add(&acc, &acc, &tmp);                          /* acc = Q */
+
+    /* R = (r[0]+r[1]) + p*(r[2]+r[3]) */
+    ibz_add(&tmp, &r[0], &r[1]);
+    /* reuse R_div_N as R scratch */
+    ibz_copy(&R_div_N, &tmp);
+    ibz_add(&tmp, &r[2], &r[3]);
+    ibz_mul(&tmp, &tmp, &(alg->p));
+    ibz_add(&R_div_N, &R_div_N, &tmp);                  /* R_div_N = R */
+    ibz_div(&R_div_N, &rem, &R_div_N, N);               /* R / N (rem should be 0) */
+
+    /* nrd/N = Q + R/N; check (nrd/N) mod N == 0 */
+    ibz_add(&acc, &acc, &R_div_N);
+    ibz_mod(&acc, &acc, N);
+    result = ibz_is_zero(&acc);
+
+    fprintf(stderr, "[NRD-N2] N=%d (nrd/N mod N).bits=%d N2divides=%d\n",
+        ibz_bitsize(N), ibz_bitsize(&acc), result);
+    fflush(stderr);
+
+    for (int i = 0; i < 4; i++) {
+        ibz_finalize(&q[i]);
+        ibz_finalize(&r[i]);
+    }
+    ibz_finalize(&sq);
+    ibz_finalize(&acc);
+    ibz_finalize(&tmp);
+    ibz_finalize(&R_div_N);
+    ibz_finalize(&rem);
+    return result;
+}
+
 void
 quat_lattice_O0_set(quat_lattice_t *O0)
 {
@@ -285,11 +348,10 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
             for (int i = 1; i < 4; i++)
                 ibz_rand_interval(&gen.coord[i], &ibz_const_zero, &n_temp);
 
-            // first, we compute the norm of the gen
-            quat_alg_norm(&n_temp, &norm_d, &gen, (params->algebra));
-            assert(ibz_is_one(&norm_d));
+            // paper Issue 14: compute (-nrd(γ)) mod N modularly so max
+            // ibz transient stays <= 2*log2(N) (vs full nrd ~ p*N^2).
+            quat_alg_norm_mod(&n_temp, &gen, norm, (params->algebra));
 
-            // and finally the negation mod norm
             ibz_neg(&disc, &n_temp);
             ibz_mod(&disc, &disc, norm);
             // check (-nrd:N) = 1 and compute sqrt if so
@@ -297,14 +359,13 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
             found = found && !quat_alg_elem_is_zero(&gen);
 
             // paper while condition: gcd(nrd(gamma), N^2) = N
-            //   (reject if N^2 | nrd, since then gamma is in N*O_0)
+            // (reject if N^2 | nrd, since then gamma is in N*O_0)
+            // paper Issue 14: avoid full nrd transient (~p*N^2 bit). Helper
+            // decomposes nrd = N*Q + R and checks (Q + R/N) mod N == 0,
+            // keeping max transient at 2*log2(N) (paper Lemma 4N^2).
             if (found) {
-                quat_alg_norm(&n_temp, &norm_d, &gen, (params->algebra));
-                assert(ibz_is_one(&norm_d));
-                ibz_mul(&disc, norm, norm);            // disc = N^2
-                ibz_mod(&n_temp, &n_temp, &disc);      // nrd mod N^2
-                if (ibz_cmp(&n_temp, &ibz_const_zero) == 0)
-                    found = 0;                          // N^2 | nrd, reject
+                if (quat_alg_nrd_N2_divides(&gen, norm, (params->algebra)))
+                    found = 0;
             }
         }
 
@@ -318,23 +379,19 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
             ibz_init(&beta_nrd_d);
 
             // beta = a + b*i + c*j + d*k, with a^2+b^2+p(c^2+d^2) != 0 (mod N)
+            // paper Issue 14: norm-mod kept under 2*log2(N) instead of p*N^2
             while (!beta_ok) {
                 ibz_sub(&n_temp, norm, &ibz_const_one);
                 for (int i = 0; i < 4; i++)
                     ibz_rand_interval(&gen_rerand.coord[i], &ibz_const_zero, &n_temp);
-                quat_alg_norm(&beta_nrd, &beta_nrd_d, &gen_rerand, (params->algebra));
-                assert(ibz_is_one(&beta_nrd_d));
-                ibz_mod(&beta_nrd, &beta_nrd, norm);
+                quat_alg_norm_mod(&beta_nrd, &gen_rerand, norm, (params->algebra));
                 beta_ok = (ibz_cmp(&beta_nrd, &ibz_const_zero) != 0);
             }
 
-            // g <- gamma * beta
-            quat_alg_mul(&gen, &gen, &gen_rerand, (params->algebra));
-            assert(ibz_is_one(&gen.denom));
-
-            // g <- g mod N (mod N * O_0): reduce each coordinate mod N
-            for (int i = 0; i < 4; i++)
-                ibz_mod(&gen.coord[i], &gen.coord[i], norm);
+            // paper Issue 14: g = gamma*beta computed mod N*O_0 directly
+            // (paper Algorithm RandomIdealGivenPrimeNorm line 59), so coord
+            // intermediates stay within paper Lemma 4N^2 bound.
+            quat_alg_mul_mod(&gen, &gen, &gen_rerand, norm, (params->algebra));
 
             ibz_finalize(&beta_nrd);
             ibz_finalize(&beta_nrd_d);
@@ -375,7 +432,10 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
     // in both cases, whether norm is prime or not prime,
     // gen is not divisible by any integer factor of the target norm
     // therefore the call below will yield an ideal of the correct norm
-    quat_lideal_create(lideal, &gen, norm, &((params->order)->order), (params->algebra));
+    // paper Issue 9: norm = caller-supplied N (RandomIdealGivenPrimeNorm
+    // guarantees nrd(ideal) = N via Lemma nrd-mod). Skip quat_alg_norm(gen)
+    // which produces a ~2*N + p_bits transient (~1275 bit at lvl1 commit).
+    quat_lideal_create_with_norm(lideal, &gen, norm, &((params->order)->order), (params->algebra));
     assert(ibz_cmp(norm, &(lideal->norm)) == 0);
 
     ibz_finalize(&n_temp);

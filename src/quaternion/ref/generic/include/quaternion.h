@@ -506,6 +506,25 @@ void quat_lideal_create(quat_left_ideal_t *lideal,
                         const quat_lattice_t *order,
                         const quat_alg_t *alg);
 
+/* paper Issue 9: same as quat_lideal_create but skips quat_alg_norm(x).
+ * Caller must guarantee that the lattice norm equals N (i.e. x is not
+ * divisible by any integer divisor n>1 of N inside the order). Avoids
+ * the 2*coord+p_bits transient blow-up in quat_alg_norm. */
+void quat_lideal_create_with_norm(quat_left_ideal_t *lideal,
+                                  const quat_alg_elem_t *x,
+                                  const ibz_t *N,
+                                  const quat_lattice_t *order,
+                                  const quat_alg_t *alg);
+
+/* paper Issue 14 (Algorithm RandomIdealGivenPrimeNorm, 04Sampling.tex:38):
+ * compute nrd(x) mod N with each ibz_mul transient <= max(2*log2(N), p_bits+log2(N)).
+ * Assumes x->denom == 1. Used by sampling to match paper Lemma 4N^2. */
+void quat_alg_norm_mod(ibz_t *res, const quat_alg_elem_t *x, const ibz_t *N, const quat_alg_t *alg);
+
+/* paper Issue 14: compute (a*b mod N*O_0) coord-by-coord with bounded transients.
+ * Output res has denom=1 and coords in [0, N). Assumes a->denom == 1, b->denom == 1. */
+void quat_alg_mul_mod(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg_elem_t *b, const ibz_t *N, const quat_alg_t *alg);
+
 /** @}
  */
 

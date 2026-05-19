@@ -35,12 +35,44 @@ quat_lideal_lideal_mul_reduced(quat_left_ideal_t *prod,
     ibz_mat_4x4_t red;
     ibz_mat_4x4_init(&red);
 
+    /* paper Issue 11/12: this is the bar(J_t)·I (or symmetric variant)
+     * ideal multiplication used by SuitableIdeals / IdealToIsogeny.
+     * Lemma idealmult-bound predicts max bit < 1024 p^2/π^4 · log p · nrd(I).
+     * Trace I/O sizes to verify. */
+    {
+        int b1 = ibz_bitsize(&(lideal1->lattice.basis[0][0]));
+        int b2 = ibz_bitsize(&(lideal2->lattice.basis[0][0]));
+        int n1 = ibz_bitsize(&(lideal1->norm));
+        int n2 = ibz_bitsize(&(lideal2->norm));
+        fprintf(stderr, "[LMUL] in basis1=%d basis2=%d nrd1=%d nrd2=%d\n", b1, b2, n1, n2);
+        fflush(stderr);
+    }
+
     quat_lattice_mul(
         &(prod->lattice), &(lideal1->lattice), &(lideal2->lattice), alg, (&lideal1->norm), &(lideal2->norm));
+
+    {
+        int bp = ibz_bitsize(&(prod->lattice.basis[0][0]));
+        int dp = ibz_bitsize(&(prod->lattice.denom));
+        fprintf(stderr, "[LMUL] post_mul basis=%d denom=%d\n", bp, dp);
+        fflush(stderr);
+    }
+
     prod->parent_order = lideal1->parent_order;
+    fprintf(stderr, "[LMUL] pre_norm prod.basis=%d prod.denom=%d\n",
+        ibz_bitsize(&(prod->lattice.basis[0][0])), ibz_bitsize(&(prod->lattice.denom))); fflush(stderr);
     quat_lideal_norm(prod);
+    fprintf(stderr, "[LMUL] post_norm prod.norm=%d\n", ibz_bitsize(&(prod->norm))); fflush(stderr);
     quat_lideal_reduce_basis(&red, gram, prod, alg);
+    fprintf(stderr, "[LMUL] post_reduce_basis red[0][0]=%d\n", ibz_bitsize(&red[0][0])); fflush(stderr);
     ibz_mat_4x4_copy(&(prod->lattice.basis), &red);
+
+    {
+        int bf = ibz_bitsize(&(prod->lattice.basis[0][0]));
+        int gf = ibz_bitsize(&((*gram)[0][0]));
+        fprintf(stderr, "[LMUL] post_LLL basis=%d gram[0][0]=%d\n", bf, gf);
+        fflush(stderr);
+    }
 
     ibz_mat_4x4_finalize(&red);
 }

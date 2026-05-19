@@ -30,6 +30,14 @@
 
 #define SYM_LOWER(M, i, j) ((i) >= (j) ? &(M)[i][j] : &(M)[j][i])
 
+/* paper Issue 17 / Gap H: track max bit observed in ML2 internals to compare
+ * against paper Theorem (Improved Sign bound 2^21*p^7 ~ 1757 bit at lvl1). */
+static int _ml2_peak_bit = 0;
+static inline void _ml2_track(const ibz_t *x) {
+    int b = ibz_bitsize(x);
+    if (b > _ml2_peak_bit) _ml2_peak_bit = b;
+}
+
 /* ========== state ========== */
 
 typedef struct {
@@ -95,8 +103,10 @@ ml2_recompute_gram(ml2_state_t *st)
             ibz_set(&st->G[i][j], 0);
             for (int k = 0; k < 4; k++) {
                 ibz_mul(&tmp, &st->b[i][k], &st->b[j][k]);
+                _ml2_track(&tmp);
                 ibz_add(&st->G[i][j], &st->G[i][j], &tmp);
             }
+            _ml2_track(&st->G[i][j]);
         }
     }
     ibz_finalize(&tmp);
@@ -363,10 +373,25 @@ quat_ml2(ibz_vec_4_t *output,
 
     ml2_state_t st;
     ml2_state_init(&st, d);
+    int local_peak_start = _ml2_peak_bit;
+    _ml2_peak_bit = 0;
+    int input_peak = 0;
     for (int i = 0; i < d; i++)
-        for (int c = 0; c < 4; c++)
+        for (int c = 0; c < 4; c++) {
             ibz_copy(&st.b[i][c], &input[i][c]);
+            int bb = ibz_bitsize(&st.b[i][c]);
+            if (bb > input_peak) input_peak = bb;
+            _ml2_track(&st.b[i][c]);
+        }
+    if (trace) {
+        fprintf(stderr, "[ML2 #%d] input_peak=%d (max bit among 8x4 input entries)\n", N, input_peak);
+        fflush(stderr);
+    }
     ml2_recompute_gram(&st);
+    if (trace) {
+        fprintf(stderr, "[ML2 #%d] post_gram peak_so_far=%d\n", N, _ml2_peak_bit);
+        fflush(stderr);
+    }
     if (trace) { fprintf(stderr, "[ML2 #%d] gram done G[0][0] limb0..3: %016lx %016lx %016lx %016lx\n", N,
         (unsigned long)st.G[0][0][0], (unsigned long)st.G[0][0][1],
         (unsigned long)st.G[0][0][2], (unsigned long)st.G[0][0][3]); fflush(stderr); }
@@ -404,6 +429,21 @@ quat_ml2(ibz_vec_4_t *output,
     for (int i = 0; i < n; i++)
         for (int c = 0; c < 4; c++)
             ibz_copy(&output[i][c], &st.b[st.zeta + i][c]);
+
+    /* Track final b and G size for peak report */
+    for (int i = 0; i < d; i++)
+        for (int c = 0; c < 4; c++)
+            _ml2_track(&st.b[i][c]);
+    for (int i = 0; i < d; i++)
+        for (int j = 0; j <= i; j++)
+            _ml2_track(&st.G[i][j]);
+
+    if (trace) {
+        fprintf(stderr, "[ML2 #%d] peak_bit_seen=%d (paper sign bound 2^21*p^7 ~ 1757 bit at lvl1)\n",
+            N, _ml2_peak_bit);
+        fflush(stderr);
+    }
+    (void)local_peak_start;
 
     ml2_state_finalize(&st);
     if (trace) { fprintf(stderr, "[ML2 #%d] exit rho=%d copied n=%d\n", N, rho, n); fflush(stderr); }

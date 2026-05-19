@@ -244,6 +244,10 @@ protocols_verify(signature_t *sig, const public_key_t *pk, const unsigned char *
 {
     int verify;
 
+    fprintf(stderr, "[VERIFY] enter two_resp_length=%d backtracking=%d\n",
+        (int)sig->two_resp_length, (int)sig->backtracking);
+    fflush(stderr);
+
     if (!check_canonical_basis_change_matrix(sig))
         return 0;
 

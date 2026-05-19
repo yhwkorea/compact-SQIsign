@@ -98,6 +98,51 @@ quat_lideal_create(quat_left_ideal_t *lideal,
     quat_lattice_finalize(&ON);
 }
 
+void
+quat_lideal_create_with_norm(quat_left_ideal_t *lideal,
+                             const quat_alg_elem_t *x,
+                             const ibz_t *N,
+                             const quat_lattice_t *order,
+                             const quat_alg_t *alg)
+{
+    /* paper Issue 9: norm of output ideal is N (known by caller).
+     * Skip quat_alg_norm(x) — at lvl1 with gen.coord ~865 bit it
+     * produces a ~1979 bit transient (2*865 + p_bits), busting the
+     * 28-limb (1792 bit) cap. KLKL25 J_t norm is reused via N. */
+    assert(quat_order_is_maximal(order, alg));
+    assert(!quat_alg_elem_is_zero(x));
+
+    quat_lattice_t ON;
+    quat_lattice_init(&ON);
+
+    // order * x   (no quat_alg_norm)
+    quat_lattice_alg_elem_mul(&(lideal->lattice), order, x, alg);
+    quat_lattice_reduce_denom(&(lideal->lattice), &(lideal->lattice));
+
+    // + N * order
+    ibz_mat_4x4_scalar_mul(&ON.basis, N, &order->basis);
+    ibz_copy(&ON.denom, &order->denom);
+    quat_lattice_add(&(lideal->lattice), &(lideal->lattice), &ON);
+
+    lideal->parent_order = order;
+    ibz_copy(&(lideal->norm), N);
+
+#ifndef NDEBUG
+    {
+        /* paper Issue 9: verify caller-supplied N matches actual lattice norm */
+        ibz_t verify;
+        ibz_init(&verify);
+        quat_lattice_index(&verify, &(lideal->lattice), order);
+        int ok UNUSED = ibz_sqrt(&verify, &verify);
+        assert(ok);
+        assert(ibz_cmp(&verify, N) == 0);
+        ibz_finalize(&verify);
+    }
+#endif
+
+    quat_lattice_finalize(&ON);
+}
+
 int
 quat_lideal_generator(quat_alg_elem_t *gen, const quat_left_ideal_t *lideal, const quat_alg_t *alg)
 {

@@ -117,7 +117,17 @@ compute_backtracking_signature(signature_t *sig, quat_alg_elem_t *resp_quat, ibz
     ibz_vec_4_t dummy_coord;
     ibz_vec_4_init(&dummy_coord);
 
+    fprintf(stderr, "[BACKTRACK] enter resp_quat.coord_max=%d resp_quat.denom=%d lattice_content=%d\n",
+        ({ int m=0; for (int _i=0;_i<4;_i++){int b=ibz_bitsize(&resp_quat->coord[_i]); if(b>m)m=b;} m; }),
+        ibz_bitsize(&resp_quat->denom), ibz_bitsize(lattice_content));
+    fflush(stderr);
+
     quat_alg_make_primitive(&dummy_coord, &tmp, resp_quat, &MAXORD_O0);
+    fprintf(stderr, "[BACKTRACK] post_make_primitive tmp=%d resp_quat.coord_max=%d\n",
+        ibz_bitsize(&tmp),
+        ({ int m=0; for (int _i=0;_i<4;_i++){int b=ibz_bitsize(&resp_quat->coord[_i]); if(b>m)m=b;} m; }));
+    fflush(stderr);
+
     ibz_mul(&resp_quat->denom, &resp_quat->denom, &tmp);
     // Under NDEBUG the assert(ok) inside quat_alg_make_primitive is compiled out,
     // so a quat_lattice_contains failure silently propagates garbage downstream
@@ -165,7 +175,15 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
     ibz_init(&norm_d);
     ibz_init(&tmp);
 
+    fprintf(stderr, "[AUX-NORM] enter resp_quat.coord_max=%d resp_quat.denom=%d lattice_content=%d\n",
+        ({ int m=0; for (int _i=0;_i<4;_i++){int b=ibz_bitsize(&resp_quat->coord[_i]); if(b>m)m=b;} m; }),
+        ibz_bitsize(&resp_quat->denom), ibz_bitsize(lattice_content));
+    fflush(stderr);
+
     quat_alg_norm(&degree_full_resp, &norm_d, resp_quat, &QUATALG_PINFTY);
+
+    fprintf(stderr, "[AUX-NORM] post_norm degree_full_resp=%d\n", ibz_bitsize(&degree_full_resp));
+    fflush(stderr);
 
     // Under NDEBUG the asserts below are compiled out, so a non-unit norm_d or
     // a non-zero remain quietly propagates garbage and starves the outer retry
@@ -200,7 +218,8 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
 
     // setting the norm
     ibz_mul(&tmp, &lideal_commit->norm, &degree_odd_resp);
-    quat_lideal_create(lideal_com_resp, resp_quat, &tmp, &MAXORD_O0, &QUATALG_PINFTY);
+    /* paper Issue 9: norm = nrd(I_com)·d_rsp known by construction (Sign Line 18) */
+    quat_lideal_create_with_norm(lideal_com_resp, resp_quat, &tmp, &MAXORD_O0, &QUATALG_PINFTY);
 
     // now we compute the ideal_aux
     // computing the norm
@@ -239,16 +258,35 @@ evaluate_random_aux_isogeny_signature(ec_curve_t *E_aux,
     quat_left_ideal_init(&lideal_aux);
     quat_left_ideal_init(&lideal_aux_resp_com);
 
+    fprintf(stderr, "[EVAL-AUX] enter norm=%d lideal_com_resp.basis_max=%d nrd=%d denom=%d\n",
+        ibz_bitsize(norm),
+        ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_com_resp->lattice.basis[_i][_j]); if(b>m)m=b;} m; }),
+        ibz_bitsize(&lideal_com_resp->norm), ibz_bitsize(&lideal_com_resp->lattice.denom));
+    fflush(stderr);
+
     // sampling the ideal at random
     int found = quat_sampling_random_ideal_O0_given_norm(
         &lideal_aux, norm, 0, &QUAT_represent_integer_params, &QUAT_prime_cofactor);
+
+    fprintf(stderr, "[EVAL-AUX] post_sampling found=%d lideal_aux.basis_max=%d\n",
+        found,
+        found ? ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_aux.lattice.basis[_i][_j]); if(b>m)m=b;} m; }) : 0);
+    fflush(stderr);
 
     if (found) {
         // pushing forward
         quat_lideal_inter(&lideal_aux_resp_com, lideal_com_resp, &lideal_aux, &QUATALG_PINFTY);
 
+        fprintf(stderr, "[EVAL-AUX] post_inter basis_max=%d denom=%d\n",
+            ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_aux_resp_com.lattice.basis[_i][_j]); if(b>m)m=b;} m; }),
+            ibz_bitsize(&lideal_aux_resp_com.lattice.denom));
+        fflush(stderr);
+
         // now we evaluate this isogeny on the basis of E0
         found = dim2id2iso_arbitrary_isogeny_evaluation(B_aux, E_aux, &lideal_aux_resp_com);
+
+        fprintf(stderr, "[EVAL-AUX] post_dim2id2iso found=%d\n", found);
+        fflush(stderr);
 
         // Clean up
         quat_left_ideal_finalize(&lideal_aux_resp_com);
@@ -266,6 +304,10 @@ compute_dim2_isogeny_challenge(theta_couple_curve_with_basis_t *codomain,
                                int exp_diadic_val_full_resp,
                                int reduced_order)
 {
+    fprintf(stderr, "[DIM2-CHL] enter degree_resp_inv=%d pow_dim2_deg_resp=%d exp_diadic=%d reduced_order=%d\n",
+        ibz_bitsize(degree_resp_inv), pow_dim2_deg_resp, exp_diadic_val_full_resp, reduced_order);
+    fflush(stderr);
+
     // now, we compute the isogeny Phi : Ecom x Eaux -> Echl' x Eaux'
     // where Echl' is 2^exp_diadic_val_full_resp isogenous to Echal
     // ker Phi = <(Bcom_can.P,Baux.P),(Bcom_can.Q,Baux.Q)>
@@ -359,7 +401,8 @@ compute_small_chain_isogeny_signature(ec_curve_t *E_chall_2,
     ibz_pow(&two_pow, &ibz_const_two, length);
 
     // we compute the generator of the challenge ideal
-    quat_lideal_create(&lideal_resp_two, resp_quat, &two_pow, &MAXORD_O0, &QUATALG_PINFTY);
+    /* paper Issue 9: norm = 2^length known by construction */
+    quat_lideal_create_with_norm(&lideal_resp_two, resp_quat, &two_pow, &MAXORD_O0, &QUATALG_PINFTY);
 
     // computing the coefficients of the kernel in terms of the basis of O0
     id2iso_ideal_to_kernel_dlogs_even(&vec_resp_two, &lideal_resp_two);
@@ -459,6 +502,9 @@ compute_and_set_basis_change_matrix(signature_t *sig,
                                     ec_curve_t *E_chall,
                                     int f)
 {
+    fprintf(stderr, "[BASIS-CHG] enter f=%d\n", f);
+    fflush(stderr);
+
     // Matrices for change of bases matrices
     ibz_mat_2x2_t mat_Baux2_to_Baux2_can, mat_Bchall_can_to_Bchall;
     ibz_mat_2x2_init(&mat_Baux2_to_Baux2_can);

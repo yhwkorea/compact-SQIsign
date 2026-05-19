@@ -139,6 +139,150 @@ quat_alg_mul(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg_elem
 }
 
 void
+quat_alg_norm_mod(ibz_t *res, const quat_alg_elem_t *x, const ibz_t *N, const quat_alg_t *alg)
+{
+    /* paper Issue 14: nrd(x) mod N = (x0^2 + x1^2 + p*x2^2 + p*x3^2) mod N
+     * with each ibz_mul reduced before the next operation. Max transient
+     * is max(2*log2(N), p_bits + log2(N)), matching paper Lemma 4N^2 when N >= p. */
+    assert(ibz_is_one(&(x->denom)));
+    ibz_t tmp;
+    ibz_init(&tmp);
+
+    /* res = x0^2 mod N */
+    ibz_mul(res, &(x->coord[0]), &(x->coord[0]));
+    ibz_mod(res, res, N);
+
+    /* res += x1^2 mod N */
+    ibz_mul(&tmp, &(x->coord[1]), &(x->coord[1]));
+    ibz_mod(&tmp, &tmp, N);
+    ibz_add(res, res, &tmp);
+
+    /* res += p * (x2^2 mod N) mod N */
+    ibz_mul(&tmp, &(x->coord[2]), &(x->coord[2]));
+    ibz_mod(&tmp, &tmp, N);
+    ibz_mul(&tmp, &tmp, &(alg->p));
+    ibz_mod(&tmp, &tmp, N);
+    ibz_add(res, res, &tmp);
+
+    /* res += p * (x3^2 mod N) mod N */
+    ibz_mul(&tmp, &(x->coord[3]), &(x->coord[3]));
+    ibz_mod(&tmp, &tmp, N);
+    ibz_mul(&tmp, &tmp, &(alg->p));
+    ibz_mod(&tmp, &tmp, N);
+    ibz_add(res, res, &tmp);
+
+    ibz_mod(res, res, N);
+
+    fprintf(stderr, "[ALGNORM-MOD] in_coord_max=%d N=%d out=%d\n",
+        (int)ibz_bitsize(&(x->coord[0])) > (int)ibz_bitsize(&(x->coord[1])) ?
+            (ibz_bitsize(&(x->coord[0])) > ibz_bitsize(&(x->coord[2])) ?
+                (ibz_bitsize(&(x->coord[0])) > ibz_bitsize(&(x->coord[3])) ? ibz_bitsize(&(x->coord[0])) : ibz_bitsize(&(x->coord[3]))) :
+                (ibz_bitsize(&(x->coord[2])) > ibz_bitsize(&(x->coord[3])) ? ibz_bitsize(&(x->coord[2])) : ibz_bitsize(&(x->coord[3])))) :
+            (ibz_bitsize(&(x->coord[1])) > ibz_bitsize(&(x->coord[2])) ?
+                (ibz_bitsize(&(x->coord[1])) > ibz_bitsize(&(x->coord[3])) ? ibz_bitsize(&(x->coord[1])) : ibz_bitsize(&(x->coord[3]))) :
+                (ibz_bitsize(&(x->coord[2])) > ibz_bitsize(&(x->coord[3])) ? ibz_bitsize(&(x->coord[2])) : ibz_bitsize(&(x->coord[3])))),
+        ibz_bitsize(N), ibz_bitsize(res));
+    fflush(stderr);
+
+    ibz_finalize(&tmp);
+}
+
+void
+quat_alg_mul_mod(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg_elem_t *b, const ibz_t *N, const quat_alg_t *alg)
+{
+    /* paper Issue 14: (a*b) mod N*O_0 — coords computed with each ibz_mul
+     * followed by ibz_mod, max transient = max(2*log2(N), p_bits + log2(N)).
+     * Use a local sum[4] so aliasing res==a or res==b is safe. */
+    assert(ibz_is_one(&(a->denom)));
+    assert(ibz_is_one(&(b->denom)));
+    ibz_t prod;
+    ibz_vec_4_t sum;
+    ibz_init(&prod);
+    ibz_vec_4_init(&sum);
+
+    /* sum[0] = a[0]*b[0] - a[1]*b[1] - p*(a[2]*b[2] + a[3]*b[3]) */
+    ibz_mul(&prod, &(a->coord[2]), &(b->coord[2]));
+    ibz_mod(&prod, &prod, N);
+    ibz_sub(&sum[0], &sum[0], &prod);
+    ibz_mul(&prod, &(a->coord[3]), &(b->coord[3]));
+    ibz_mod(&prod, &prod, N);
+    ibz_sub(&sum[0], &sum[0], &prod);
+    ibz_mod(&sum[0], &sum[0], N);
+    ibz_mul(&sum[0], &sum[0], &(alg->p));
+    ibz_mod(&sum[0], &sum[0], N);
+    ibz_mul(&prod, &(a->coord[0]), &(b->coord[0]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[0], &sum[0], &prod);
+    ibz_mul(&prod, &(a->coord[1]), &(b->coord[1]));
+    ibz_mod(&prod, &prod, N);
+    ibz_sub(&sum[0], &sum[0], &prod);
+    ibz_mod(&sum[0], &sum[0], N);
+
+    /* sum[1] = a[0]*b[1] + a[1]*b[0] + p*(a[2]*b[3] - a[3]*b[2]) */
+    ibz_mul(&prod, &(a->coord[2]), &(b->coord[3]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[1], &sum[1], &prod);
+    ibz_mul(&prod, &(a->coord[3]), &(b->coord[2]));
+    ibz_mod(&prod, &prod, N);
+    ibz_sub(&sum[1], &sum[1], &prod);
+    ibz_mod(&sum[1], &sum[1], N);
+    ibz_mul(&sum[1], &sum[1], &(alg->p));
+    ibz_mod(&sum[1], &sum[1], N);
+    ibz_mul(&prod, &(a->coord[0]), &(b->coord[1]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[1], &sum[1], &prod);
+    ibz_mul(&prod, &(a->coord[1]), &(b->coord[0]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[1], &sum[1], &prod);
+    ibz_mod(&sum[1], &sum[1], N);
+
+    /* sum[2] = a[0]*b[2] + a[2]*b[0] - a[1]*b[3] + a[3]*b[1] */
+    ibz_mul(&prod, &(a->coord[0]), &(b->coord[2]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[2], &sum[2], &prod);
+    ibz_mul(&prod, &(a->coord[2]), &(b->coord[0]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[2], &sum[2], &prod);
+    ibz_mul(&prod, &(a->coord[1]), &(b->coord[3]));
+    ibz_mod(&prod, &prod, N);
+    ibz_sub(&sum[2], &sum[2], &prod);
+    ibz_mul(&prod, &(a->coord[3]), &(b->coord[1]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[2], &sum[2], &prod);
+    ibz_mod(&sum[2], &sum[2], N);
+
+    /* sum[3] = a[0]*b[3] + a[3]*b[0] - a[2]*b[1] + a[1]*b[2] */
+    ibz_mul(&prod, &(a->coord[0]), &(b->coord[3]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[3], &sum[3], &prod);
+    ibz_mul(&prod, &(a->coord[3]), &(b->coord[0]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[3], &sum[3], &prod);
+    ibz_mul(&prod, &(a->coord[2]), &(b->coord[1]));
+    ibz_mod(&prod, &prod, N);
+    ibz_sub(&sum[3], &sum[3], &prod);
+    ibz_mul(&prod, &(a->coord[1]), &(b->coord[2]));
+    ibz_mod(&prod, &prod, N);
+    ibz_add(&sum[3], &sum[3], &prod);
+    ibz_mod(&sum[3], &sum[3], N);
+
+    for (int i = 0; i < 4; i++)
+        ibz_copy(&(res->coord[i]), &sum[i]);
+    ibz_set(&(res->denom), 1);
+
+    int mx = ibz_bitsize(&(res->coord[0]));
+    for (int i = 1; i < 4; i++) {
+        int b = ibz_bitsize(&(res->coord[i]));
+        if (b > mx) mx = b;
+    }
+    fprintf(stderr, "[ALGMUL-MOD] N=%d out_coord_max=%d\n", ibz_bitsize(N), mx);
+    fflush(stderr);
+
+    ibz_finalize(&prod);
+    ibz_vec_4_finalize(&sum);
+}
+
+void
 quat_alg_norm(ibz_t *res_num, ibz_t *res_denom, const quat_alg_elem_t *a, const quat_alg_t *alg)
 {
     ibz_t r, g;
@@ -155,6 +299,22 @@ quat_alg_norm(ibz_t *res_num, ibz_t *res_denom, const quat_alg_elem_t *a, const 
     ibz_abs(res_denom, res_denom);
     ibz_abs(res_num, res_num);
     assert(ibz_cmp(res_denom, &ibz_const_zero) > 0);
+
+    /* P5 trace: input coord max bit / output norm bit / output denom bit */
+    {
+        int in_max = 0;
+        for (int _i = 0; _i < 4; _i++) {
+            int b = ibz_bitsize(&(a->coord[_i]));
+            if (b > in_max) in_max = b;
+        }
+        int in_den = ibz_bitsize(&(a->denom));
+        int out_num = ibz_bitsize(res_num);
+        int out_den = ibz_bitsize(res_denom);
+        fprintf(stderr, "[ALGNORM] in_coord_max=%d in_den=%d out_num=%d out_den=%d ratio=%.2f\n",
+            in_max, in_den, out_num, out_den,
+            in_max > 0 ? (double)out_num / (double)in_max : 0.0);
+        fflush(stderr);
+    }
 
     quat_alg_elem_finalize(&norm);
     ibz_finalize(&r);

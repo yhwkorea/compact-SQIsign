@@ -101,6 +101,22 @@ quat_lattice_add(quat_lattice_t *res, const quat_lattice_t *lat1, const quat_lat
     for (int i = 0; i < 8; i++)
         ibz_vec_4_init(&(generators[i]));
     ibz_mat_4x4_init(&tmp);
+
+    /* Issue 17 trace: log input sizes */
+    {
+        int max1 = 0, max2 = 0;
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++) {
+                int b1 = ibz_bitsize(&(lat1->basis[i][j]));
+                int b2 = ibz_bitsize(&(lat2->basis[i][j]));
+                if (b1 > max1) max1 = b1;
+                if (b2 > max2) max2 = b2;
+            }
+        fprintf(stderr, "[LATTICE-ADD] lat1.basis_max=%d lat1.denom=%d lat2.basis_max=%d lat2.denom=%d\n",
+            max1, ibz_bitsize(&(lat1->denom)), max2, ibz_bitsize(&(lat2->denom)));
+        fflush(stderr);
+    }
+
     ibz_mat_4x4_scalar_mul(&tmp, &(lat1->denom), &(lat2->basis));
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
@@ -203,7 +219,31 @@ quat_lattice_alg_elem_mul(quat_lattice_t *prod,
 {
     quat_lattice_mat_alg_coord_mul_without_hnf(&(prod->basis), &(lat->basis), &(elem->coord), alg);
     ibz_mul(&(prod->denom), &(lat->denom), &(elem->denom));
-    quat_lattice_hnf(prod);
+    /* paper Issue 8 extension (replaces quat_lattice_hnf): use ML2 on the
+     * 4 column generators to obtain a LLL-reduced basis of the lattice
+     * (without cofactor blow-up). Columns of prod->basis ARE the generators. */
+    {
+        ibz_vec_4_t gens[4], reduced[4];
+        for (int i = 0; i < 4; i++) {
+            ibz_vec_4_init(&gens[i]);
+            ibz_vec_4_init(&reduced[i]);
+            for (int j = 0; j < 4; j++)
+                ibz_copy(&gens[i][j], &(prod->basis[j][i]));
+        }
+        int rho = quat_ml2(reduced, 4, gens, 4, alg);
+        if (rho >= 4) {
+            for (int i = 0; i < 4; i++)
+                for (int j = 0; j < 4; j++)
+                    ibz_copy(&(prod->basis[j][i]), &reduced[i][j]);
+        } else {
+            fprintf(stderr, "[ALG_ELEM_MUL] ML2 returned rho=%d (<4), keeping un-reduced basis\n", rho);
+        }
+        for (int i = 0; i < 4; i++) {
+            ibz_vec_4_finalize(&gens[i]);
+            ibz_vec_4_finalize(&reduced[i]);
+        }
+    }
+    quat_lattice_reduce_denom(prod, prod);
 }
 
 void
