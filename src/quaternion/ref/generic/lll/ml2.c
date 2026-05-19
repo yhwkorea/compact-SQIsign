@@ -154,7 +154,10 @@ ml2_lazy_size_reduce(ml2_state_t *st, int kappa)
 
     int z = st->zeta;
 
-    for (int iter = 0; iter < 8192; iter++) {
+    /* paper Algorithm LazySizeReduce: loop until max |mu_kappa,j| <= eta_bar.
+     * Paper guarantees size-monotonic convergence (Issue 13 author reply).
+     * Large cap to let paper's monotonic argument dominate, not artificial abort. */
+    for (int iter = 0; iter < 65536; iter++) {
         ml2_cfa_kappa(st, kappa);
 
         /* check if all |mu[kappa][j]| <= eta_bar */
@@ -264,41 +267,20 @@ ml2_main_loop(ml2_state_t *st)
     dpe_set_z(st->r[0][0], &st->G[0][0]);
     int kappa = 1;
     int outer_iter = 0;
-    const int OUTER_MAX = 4096;
-
-    /* same-state oscillation detection: NS09 main loop can flip-flop between two
-     * (kappa, zeta) configurations when two r values are numerically near-equal.
-     * Track last 8 iter states; if same (kappa, zeta) appears >=4 times, abort. */
-    int hist_state[8];
-    for (int h = 0; h < 8; h++)
-        hist_state[h] = -1;
-    int hist_idx = 0;
+    /* paper Issue 13 (author reply): "size-reduce하면 entry 증가 X, size 단조 감소".
+     * Paper ML2 (NS09 Fig 9) does not have abort/oscillation detection — convergence
+     * guaranteed by Lemma lazy-size-reduction-bound + size-monotonic invariant.
+     * Set OUTER_MAX large enough that termination is dominated by paper's convergence
+     * theorem, not by our cap. No same-state early-abort. */
+    const int OUTER_MAX = 65536;
 
     while (kappa < st->d) {
         outer_iter++;
         if (outer_iter > OUTER_MAX) {
-            /* hard cap fallback */
             static int _over_n = 0;
             if (_over_n++ < 3)
                 fprintf(stderr, "[ML2-MAIN-OVER] iter>%d kappa=%d zeta=%d d=%d\n",
                     OUTER_MAX, kappa, st->zeta, st->d);
-            fflush(stderr);
-            st->aborted = 1;
-            break;
-        }
-        /* same-state early detect */
-        int cur_state = (kappa << 16) | (st->zeta & 0xffff);
-        int seen = 0;
-        for (int h = 0; h < 8; h++)
-            if (hist_state[h] == cur_state)
-                seen++;
-        hist_state[hist_idx] = cur_state;
-        hist_idx = (hist_idx + 1) % 8;
-        if (seen >= 4) {
-            static int _osc_n = 0;
-            if (_osc_n++ < 3)
-                fprintf(stderr, "[ML2-OSCILLATE] same (kappa=%d, zeta=%d) %d/8 at iter=%d d=%d (early break)\n",
-                    kappa, st->zeta, seen, outer_iter, st->d);
             fflush(stderr);
             st->aborted = 1;
             break;

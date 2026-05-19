@@ -276,7 +276,8 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
     // the first step is to generate one ideal of the correct norm
     if (is_prime) {
 
-        // we find a quaternion element of norm divisible by norm
+        // paper Algorithm RandomIdealGivenPrimeNorm (04Sampling.tex:38)
+        // step 1: sample gamma = g1*i + g2*j + g3*k with sqrt(-nrd) mod N adjusted
         while (!found) {
             // generating a trace-zero element at random
             ibz_set(&gen.coord[0], 0);
@@ -291,10 +292,52 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
             // and finally the negation mod norm
             ibz_neg(&disc, &n_temp);
             ibz_mod(&disc, &disc, norm);
-            // now we check that -n is a square mod norm
-            // and if the square root exists we compute it
+            // check (-nrd:N) = 1 and compute sqrt if so
             found = ibz_sqrt_mod_p(&gen.coord[0], &disc, norm);
             found = found && !quat_alg_elem_is_zero(&gen);
+
+            // paper while condition: gcd(nrd(gamma), N^2) = N
+            //   (reject if N^2 | nrd, since then gamma is in N*O_0)
+            if (found) {
+                quat_alg_norm(&n_temp, &norm_d, &gen, (params->algebra));
+                assert(ibz_is_one(&norm_d));
+                ibz_mul(&disc, norm, norm);            // disc = N^2
+                ibz_mod(&n_temp, &n_temp, &disc);      // nrd mod N^2
+                if (ibz_cmp(&n_temp, &ibz_const_zero) == 0)
+                    found = 0;                          // N^2 | nrd, reject
+            }
+        }
+
+        // paper Algorithm steps 2-3: sample beta and set g <- gamma*beta mod N
+        //   Issue 5 (author reply): mod N is REQUIRED; otherwise gamma*beta
+        //   blows up modified LLL (intermediate values explode).
+        {
+            ibz_t beta_nrd, beta_nrd_d;
+            int beta_ok = 0;
+            ibz_init(&beta_nrd);
+            ibz_init(&beta_nrd_d);
+
+            // beta = a + b*i + c*j + d*k, with a^2+b^2+p(c^2+d^2) != 0 (mod N)
+            while (!beta_ok) {
+                ibz_sub(&n_temp, norm, &ibz_const_one);
+                for (int i = 0; i < 4; i++)
+                    ibz_rand_interval(&gen_rerand.coord[i], &ibz_const_zero, &n_temp);
+                quat_alg_norm(&beta_nrd, &beta_nrd_d, &gen_rerand, (params->algebra));
+                assert(ibz_is_one(&beta_nrd_d));
+                ibz_mod(&beta_nrd, &beta_nrd, norm);
+                beta_ok = (ibz_cmp(&beta_nrd, &ibz_const_zero) != 0);
+            }
+
+            // g <- gamma * beta
+            quat_alg_mul(&gen, &gen, &gen_rerand, (params->algebra));
+            assert(ibz_is_one(&gen.denom));
+
+            // g <- g mod N (mod N * O_0): reduce each coordinate mod N
+            for (int i = 0; i < 4; i++)
+                ibz_mod(&gen.coord[i], &gen.coord[i], norm);
+
+            ibz_finalize(&beta_nrd);
+            ibz_finalize(&beta_nrd_d);
         }
     } else {
         assert(prime_cofactor != NULL);

@@ -651,17 +651,57 @@ quat_lattice_intersect_mlll(quat_lattice_t *res,
                             const quat_lattice_t *lat2,
                             const quat_alg_t *alg)
 {
-    /* Same structure as quat_lattice_intersect (lattice.c), but inner
-     * sum uses MLLL alternate. Final HNF retained for canonical form. */
+    /* Paper Algorithm CompactLatticeIntersection (03Ideal.tex:340-).
+     * Critical: Lines 5-6 LLL-reduce inputs so that adjugate bound for
+     * LLL-reduced O_0-ideal bases applies before dual computation
+     * (paper Remark after lem:latticeinter-bound). Line 14 LLL-reduce output. */
+    quat_lattice_t lat1_red, lat2_red;
     quat_lattice_t dual1, dual2, dual_res;
+    ibz_mat_4x4_t res_red;
+    quat_lattice_init(&lat1_red);
+    quat_lattice_init(&lat2_red);
     quat_lattice_init(&dual1);
     quat_lattice_init(&dual2);
     quat_lattice_init(&dual_res);
-    quat_lattice_dual_without_hnf(&dual1, lat1);
-    quat_lattice_dual_without_hnf(&dual2, lat2);
+    ibz_mat_4x4_init(&res_red);
+
+    /* Paper lines 5-6: M_k <- LLL(M_k; delta=3/4) */
+    fprintf(stderr, "[IMLLL] L5 lat1 basis_max=%d denom=%d\n",
+        ibz_bitsize(&lat1->basis[0][0]), ibz_bitsize(&lat1->denom)); fflush(stderr);
+    quat_lattice_lll(&(lat1_red.basis), lat1, alg);
+    ibz_copy(&(lat1_red.denom), &(lat1->denom));
+    fprintf(stderr, "[IMLLL] L5 done basis_max=%d\n",
+        ibz_bitsize(&lat1_red.basis[0][0])); fflush(stderr);
+
+    fprintf(stderr, "[IMLLL] L6 lat2 basis_max=%d\n", ibz_bitsize(&lat2->basis[0][0])); fflush(stderr);
+    quat_lattice_lll(&(lat2_red.basis), lat2, alg);
+    ibz_copy(&(lat2_red.denom), &(lat2->denom));
+    fprintf(stderr, "[IMLLL] L6 done basis_max=%d\n",
+        ibz_bitsize(&lat2_red.basis[0][0])); fflush(stderr);
+
+    /* Paper lines 7-12: duals, sum via MLLL, dual back */
+    fprintf(stderr, "[IMLLL] L7 dual1\n"); fflush(stderr);
+    quat_lattice_dual_without_hnf(&dual1, &lat1_red);
+    fprintf(stderr, "[IMLLL] L8 dual2\n"); fflush(stderr);
+    quat_lattice_dual_without_hnf(&dual2, &lat2_red);
+    fprintf(stderr, "[IMLLL] L11 add_mlll dual1.basis=%d dual2.basis=%d\n",
+        ibz_bitsize(&dual1.basis[0][0]), ibz_bitsize(&dual2.basis[0][0])); fflush(stderr);
     quat_lattice_add_mlll(&dual_res, &dual1, &dual2, alg);
+    fprintf(stderr, "[IMLLL] L11 done basis_max=%d\n",
+        ibz_bitsize(&dual_res.basis[0][0])); fflush(stderr);
+    fprintf(stderr, "[IMLLL] L12 dual_back\n"); fflush(stderr);
     quat_lattice_dual_without_hnf(res, &dual_res);
-    quat_lattice_hnf(res);
+    fprintf(stderr, "[IMLLL] L12 done basis_max=%d\n", ibz_bitsize(&res->basis[0][0])); fflush(stderr);
+
+    /* Paper line 14: gamma <- LLL(gamma; delta=3/4) */
+    fprintf(stderr, "[IMLLL] L14 final LLL basis_max=%d\n", ibz_bitsize(&res->basis[0][0])); fflush(stderr);
+    quat_lattice_lll(&res_red, res, alg);
+    ibz_mat_4x4_copy(&(res->basis), &res_red);
+    fprintf(stderr, "[IMLLL] L14 done basis_max=%d\n", ibz_bitsize(&res->basis[0][0])); fflush(stderr);
+
+    ibz_mat_4x4_finalize(&res_red);
+    quat_lattice_finalize(&lat1_red);
+    quat_lattice_finalize(&lat2_red);
     quat_lattice_finalize(&dual1);
     quat_lattice_finalize(&dual2);
     quat_lattice_finalize(&dual_res);
@@ -673,12 +713,19 @@ quat_lattice_add_mlll(quat_lattice_t *res,
                       const quat_lattice_t *lat2,
                       const quat_alg_t *alg)
 {
+    /* paper 03Ideal.tex: "we use the modified LLL algorithm with
+     * floating-point arithmetic [NS09], which we call ML2 or modified LLL"
+     * "We also call LLL as the special case of MLLL when d=4 in Algorithm ML2"
+     * So paper's MLLL == ML2 (NS09 Fig 9, 53-bit float). Use quat_ml2. */
     ibz_vec_4_t generators[8];
+    ibz_vec_4_t reduced[8];
     ibz_mat_4x4_t tmp;
-    int rank;
+    (void)alg;
 
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 8; i++) {
         ibz_vec_4_init(&generators[i]);
+        ibz_vec_4_init(&reduced[i]);
+    }
     ibz_mat_4x4_init(&tmp);
 
     ibz_mat_4x4_scalar_mul(&tmp, &(lat1->denom), &(lat2->basis));
@@ -691,12 +738,25 @@ quat_lattice_add_mlll(quat_lattice_t *res,
         for (int j = 0; j < 4; j++)
             ibz_copy(&(generators[4 + j][i]), &(tmp[i][j]));
 
-    quat_mlll(&(res->basis), &rank, generators, 8, alg);
+    int rho = quat_ml2(reduced, 4, generators, 8, NULL);
+    if (rho >= 4) {
+        for (int j = 0; j < 4; j++)
+            for (int i = 0; i < 4; i++)
+                ibz_copy(&(res->basis[i][j]), &reduced[j][i]);
+    } else {
+        /* ML2 abort: fall back to identity basis copy from lat1 (safety net,
+         * should not happen with paper-strict ML2). */
+        ibz_mat_4x4_copy(&(res->basis), &lat1->basis);
+        fprintf(stderr, "[ADD-MLLL] ml2 returned rho=%d, lat1 basis copied\n", rho);
+        fflush(stderr);
+    }
 
     ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
     quat_lattice_reduce_denom(res, res);
 
     ibz_mat_4x4_finalize(&tmp);
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 8; i++) {
         ibz_vec_4_finalize(&generators[i]);
+        ibz_vec_4_finalize(&reduced[i]);
+    }
 }

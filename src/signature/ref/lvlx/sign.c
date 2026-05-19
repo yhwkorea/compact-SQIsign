@@ -13,12 +13,16 @@ commit(ec_curve_t *E_com, ec_basis_t *basis_even_com, quat_left_ideal_t *lideal_
 
     bool found = false;
 
+    fprintf(stderr, "[COMMIT] enter, calling sampling_random_ideal\n"); fflush(stderr);
     found = quat_sampling_random_ideal_O0_given_norm(lideal_com, &COM_DEGREE, 1, &QUAT_represent_integer_params, NULL);
+    fprintf(stderr, "[COMMIT] sampling done found=%d\n", found); fflush(stderr);
     // replacing it with a shorter prime norm equivalent ideal
     found = found && quat_lideal_prime_norm_reduced_equivalent(
                          lideal_com, &QUATALG_PINFTY, QUAT_primality_num_iter, QUAT_equiv_bound_coeff);
+    fprintf(stderr, "[COMMIT] prime_norm_reduced_equivalent done found=%d\n", found); fflush(stderr);
     // ideal to isogeny clapotis
     found = found && dim2id2iso_arbitrary_isogeny_evaluation(basis_even_com, E_com, lideal_com);
+    fprintf(stderr, "[COMMIT] dim2id2iso done found=%d\n", found); fflush(stderr);
     return found;
 }
 
@@ -78,19 +82,24 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
     quat_lattice_init(&lattice_hom_chall_to_com);
 
     // lideal_chall_secret = lideal_secret * lideal_chall_two
+    fprintf(stderr, "[RESP] enter, calling lideal_inter\n"); fflush(stderr);
     quat_lideal_inter(&lideal_chall_secret, lideal_chall_two, &(sk->secret_ideal), &QUATALG_PINFTY);
+    fprintf(stderr, "[RESP] lideal_inter done, basis[0][0].bits=%d denom.bits=%d\n",
+            ibz_bitsize(&lideal_chall_secret.lattice.basis[0][0]),
+            ibz_bitsize(&lideal_chall_secret.lattice.denom)); fflush(stderr);
 
     // now we compute lideal_com_to_chall which is dual(Icom)* lideal_chall_secret
     quat_lattice_conjugate_without_hnf(&lat_commit, &(lideal_commit->lattice));
-    /* Phase 2 hot-path: route through Cohen integer GSO MLLL alternate.
-     * Currently ~6x slower than HNF baseline (see PHASE2_TRIAL_2026-05-15_KO.md).
-     * Kept in main so the school machine can git pull and debug/optimize directly.
-     * To restore HNF baseline temporarily: revert this line to quat_lattice_intersect. */
+    fprintf(stderr, "[RESP] conj done, calling intersect_mlll\n"); fflush(stderr);
     quat_lattice_intersect_mlll(&lattice_hom_chall_to_com, &lideal_chall_secret.lattice, &lat_commit, &QUATALG_PINFTY);
+    fprintf(stderr, "[RESP] intersect_mlll done basis[0][0].bits=%d\n",
+            ibz_bitsize(&lattice_hom_chall_to_com.basis[0][0])); fflush(stderr);
 
     // sampling the smallest response
     ibz_mul(lattice_content, &lideal_chall_secret.norm, &lideal_commit->norm);
+    fprintf(stderr, "[RESP] calling sample_response radius.bits=%d\n", ibz_bitsize(lattice_content)); fflush(stderr);
     sample_response(resp_quat, &lattice_hom_chall_to_com, lattice_content);
+    fprintf(stderr, "[RESP] sample_response done\n"); fflush(stderr);
 
     // Clean up
     quat_left_ideal_finalize(&lideal_chall_secret);

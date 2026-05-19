@@ -68,6 +68,10 @@ quat_lattice_conjugate_without_hnf(quat_lattice_t *conj, const quat_lattice_t *l
 void
 quat_lattice_dual_without_hnf(quat_lattice_t *dual, const quat_lattice_t *lat)
 {
+    /* paper Algorithm LatticeDual (91proof.tex:435): (A, Delta) = adj+det,
+     * M^# = r * A^T, r^# = Delta, then GCD-normalize (Lines 7-8). The GCD
+     * step is essential for the paper bound lem:dual-bound; without it,
+     * dual.basis can grow to 4*|entry| bits (cofactor expansion). */
     ibz_mat_4x4_t inv;
     ibz_t det;
     ibz_init(&det);
@@ -77,6 +81,9 @@ quat_lattice_dual_without_hnf(quat_lattice_t *dual, const quat_lattice_t *lat)
     // dual_denom = det/lat_denom
     ibz_mat_4x4_scalar_mul(&(dual->basis), &(lat->denom), &inv);
     ibz_copy(&(dual->denom), &det);
+
+    /* paper Line 7-8: GCD normalization */
+    quat_lattice_reduce_denom(dual, dual);
 
     ibz_finalize(&det);
     ibz_mat_4x4_finalize(&inv);

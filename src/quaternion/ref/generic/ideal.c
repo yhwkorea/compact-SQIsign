@@ -1,6 +1,7 @@
 #include <quaternion.h>
 #include <stdlib.h>
 #include "internal.h"
+#include "mlll_internals.h"
 
 // assumes parent order and lattice correctly set, computes and sets the norm
 void
@@ -186,7 +187,10 @@ quat_lideal_inter(quat_left_ideal_t *inter,
 {
     assert(I1->parent_order == I2->parent_order);
     assert(quat_order_is_maximal((I2->parent_order), alg));
-    quat_lattice_intersect(&inter->lattice, &I1->lattice, &I2->lattice);
+    /* paper Issue 8 wire — sign hot path (sign.c:81 quat_lideal_inter)
+     * routes through here. Use intersect_mlll for paper Algorithm
+     * CompactLatticeIntersection (LLL-reduced bases, ML2/MLLL output). */
+    quat_lattice_intersect_mlll(&inter->lattice, &I1->lattice, &I2->lattice, alg);
     inter->parent_order = I1->parent_order;
     quat_lideal_norm(inter);
 }
