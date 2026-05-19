@@ -1,0 +1,982 @@
+\section{Additional Proofs}
+\label{sec:proofs}
+
+\subsection{Proof of Lemma~\ref{lem:ML2-bound}}
+\label{subsec:ML2-bound}
+
+The exact integer objects in Algorithm~\ref{alg:ML2} are the vectors $b_i$, or
+equivalently the exact integral Gram matrix $G$. The quantities
+$\bar r_{i,j}$, $\bar\mu_{i,j}$, $\bar s^{(\kappa)}_j$, and $\bar\delta$ are
+fixed-precision floating-point numbers, and the indices $\kappa,\zeta$ do not
+affect the integer-size bound.
+
+We check the only steps that can affect exact integer data.
+
+\smallskip
+\noindent\textbf{(1) Initialization.}
+In line~1, the algorithm computes
+\[
+  G_{i,j}=\langle b_i,b_j\rangle .
+\]
+By Cauchy--Schwarz,
+\[
+  |G_{i,j}|
+  \le \|b_i\|\,\|b_j\|.
+\]
+
+\smallskip
+\noindent\textbf{(2) Lazy size-reduction.}
+Line~4 calls Algorithm~\ref{alg:lazy-size-reduction}. By
+Lemma~\ref{lem:lazy-size-reduction-bound}, this subroutine does not increase
+the size of any exact integer object beyond $B_{\rm in}$.
+
+\smallskip
+\noindent\textbf{(3) Insertion and remaining updates.}
+Lines~5--12 only compare or copy floating-point quantities. Line~13 inserts
+$b_{\kappa'}$ right before $b_\kappa$ and updates $G$ accordingly; this is just
+a permutation of the current vectors and of the corresponding rows and columns
+of $G$, so it creates no new integer magnitude. Lines~14--17 only test whether
+$b_\kappa=0$ and update the indices $\zeta$ and $\kappa$.
+
+Therefore every iteration of Algorithm~\ref{alg:ML2} preserves the invariant
+that all exact integer objects are bounded by $B_{\rm in}$. Since the invariant
+holds after initialization, it holds throughout the algorithm. Hence the exact
+integer size in Algorithm~\ref{alg:ML2} is bounded by
+\[
+  \max_{1\le i\le d}\|b_i\|^2.
+\] \qed
+
+\begin{algorithm}
+\caption{\textsf{LazySizeReduce}$(\kappa,\zeta,(b_1,\dots,b_d),G,\bar r,\bar\mu)$~\cite[Figure~5]{NS09}}
+\label{alg:lazy-size-reduction}
+\begin{algorithmic}[1]
+  \Statex \textbf{Input:} An index $\kappa$, vectors
+  $(b_{\zeta+1},\dots,b_\kappa)$, their Gram matrix $G$, floating-point numbers
+  $\bar r_{i,j}$ and $\bar\mu_{i,j}$ for $\zeta+1\le j\le i<\kappa$,
+  and fp-precision $\ell+1=53$.
+  \Statex \textbf{Output:} Updated $b_\kappa$, $G$, and floating-point numbers
+  $\bar r_{\kappa,j}$, $\bar\mu_{\kappa,j}$, and
+  $\bar s^{(\kappa)}_j$ for $\zeta+1\le j\le \kappa$.
+
+  \State $\bar\eta \gets \diamond(\diamond(0.55)+1/2)/2$.
+  \State Compute the $\bar r_{\kappa,j}$'s, $\bar\mu_{\kappa,j}$'s, and
+  $\bar s^{(\kappa)}_j$'s with steps 2--7 of the CFA with ``$i=\kappa$''
+  for the vectors $b_{\zeta+1},\dots,b_\kappa$.
+  \If{$\max_{\zeta+1\le j<\kappa} |\bar\mu_{\kappa,j}| \le \bar\eta$}
+    \State \Return $(b_\kappa,G,\bar r_{\kappa,*},\bar\mu_{\kappa,*},\bar s^{(\kappa)}_*)$.
+  \Else
+    \For{$i=\kappa-1$ \textbf{down to} $\zeta+1$}
+      \State $X_i \gets \lfloor \bar\mu_{\kappa,i}\rceil$.
+      \For{$j=\zeta+1$ \textbf{to} $i-1$}
+        \State $\bar\mu_{\kappa,j}\gets
+        \diamond\!\left(\bar\mu_{\kappa,j}
+        -\diamond(X_i\bar\mu_{i,j})\right)$.
+      \EndFor
+    \EndFor
+    \State $b_\kappa \gets b_\kappa-\sum_{i=\zeta+1}^{\kappa-1}X_i b_i$,
+    and update $G$ accordingly.
+    \State \textbf{go to} line 2.
+  \EndIf
+\end{algorithmic}
+\end{algorithm}
+
+\begin{lemma}[Integer-size bound for \textsf{LazySizeReduce}]
+\label{lem:lazy-size-reduction-bound}
+Let
+\[
+  B_{\rm in}:=\max_{1\le i\le d}\|b_i\|^2
+\]
+be the initial input bound of Algorithm~\ref{alg:ML2}. Assume that before a
+call to Algorithm~\ref{alg:lazy-size-reduction}, every exact integer object
+currently stored by the algorithm, namely the vector representation or
+equivalently the exact Gram-matrix representation, is bounded by $B_{\rm in}$.
+Then the returned objects
+\[
+  b_\kappa,\qquad G,\qquad
+  \bar r_{\kappa,*},\quad \bar\mu_{\kappa,*},\quad
+  \bar s^{(\kappa)}_*
+\]
+do not increase the exact integer size beyond $B_{\rm in}$.
+\end{lemma}
+
+\begin{proof}
+Algorithm~\ref{alg:lazy-size-reduction} manipulates two types of data: exact
+integer data, namely $b_\kappa$ and the Gram matrix $G$, and fixed-precision
+floating-point data, namely $\bar r$, $\bar\mu$, $\bar s$, and $\bar\eta$.
+The floating-point quantities do not contribute to the integer-size bound.
+
+Line~1 only assigns the floating-point value $\bar\eta$. Line~2 computes the
+floating-point GSO quantities by the CFA procedure, using $G$ only as exact
+input data and producing only rounded floating-point values. Hence lines~1--4
+do not create any new exact integer magnitude.
+
+The only nontrivial exact integer update occurs in lines~6--11, where
+\[
+  X_i\gets \lfloor \bar\mu_{\kappa,i}\rceil,
+  \qquad
+  b_\kappa\gets b_\kappa-\sum_{i=\zeta+1}^{\kappa-1}X_i b_i,
+\]
+and the exact Gram matrix $G$ is updated accordingly. This is precisely the
+SizeReduce operation analyzed in~\cite{KLKL25}. By the SizeReduce integer-size
+bound, this update does not increase the fixed exact-integer budget: after the
+update, the reduced vector $b_\kappa$, or equivalently the updated row and
+column of $G$, is again represented within the bound $B_{\rm in}$. All other
+rows and columns of $G$ are unchanged.
+
+Finally, line~12 only repeats the same procedure. Therefore, by induction over
+the repetitions of Algorithm~\ref{alg:lazy-size-reduction}, the subroutine
+returns without increasing the exact integer size beyond $B_{\rm in}$.
+\end{proof}
+% \subsection{Proof of Lemma~\ref{lem:mlll-bound}}
+% \label{subsec:mlll-bound}
+
+% We follow the same fixed-precision integer model as in the bound analyses of
+% LLL/L2/SizeReduce in~\cite{KLKL25}: all \emph{integer} objects that
+% Algorithm~\ref{alg:MLLL} manipulates are stored with a fixed budget.
+% (namely $h_i$ and, when the input lattice is integral, $b_i$ or an equivalent integer Gram-matrix representation)
+% It is trivial that these objects does not increase the maximum size.
+% So the only way the \emph{maximum} integer size could increase is if the algorithm
+% created an integer outside the fixed representable range before reduction.
+
+% We check the only lines that can create new integers.
+
+% \smallskip
+% \noindent\textbf{(1) Lines 2--5.}
+% In line 2, computing $\mu_{\beta j}$ and computing $B_\beta$ need to compute inner product of two vectors so the size during this computation is at most \[\max_{1\le i\le g} ||a_i||^2.\]
+% Lines 3--5 only assign zeros, copy existing vectors, or shift
+% indices. These operations do not create any new integer magnitude, hence do not
+% increase the maximum size.
+
+% \smallskip
+% \noindent\textbf{(2) Lines 7--12.}
+% When $|\mu_{ml}|>1/2$, the algorithm sets $t\gets\lfloor \mu_{ml}\rceil\in\mathbb{Z}$
+% and performs
+% \[
+% b_m \leftarrow b_m - t b_l,\qquad h_m \leftarrow h_m - t h_l,
+% \]
+% together with the standard updates of $\mu_{ml},\mu_{mj}$.
+% Here $t = \lfloor\mu_{ml}\rceil$, so the maximum size does not grow by the SizeReduce analysis in~\cite{KLKL25}.
+% After the updates, all integer entries of $b_m$ and $h_m$ are reduced back to the fixed representative range, so the maximum integer size cannot increase in this loop.
+% (The remaining updates in line~9 are performed on the real-valued $\mu$'s and
+% do not introduce any new unbounded integer.)
+
+% \smallskip
+% \noindent\textbf{(3) Lines 16--26.}
+% The assignments in lines~19--21 and lines~24--26 are permutations of existing objects so it is trivial that the size does not grow.
+% In line 16, since $0 < \mu \le 1$, the size does not grow.\\
+% In line 23, since $\sigma < g$ by line~25, it is trivial that the size does not grow.
+
+% \smallskip
+% Combining (1)--(3), we conclude the stated bound in Lemma~\ref{lem:mlll-bound} for the size of integers in modified LLL algorithm.\\ \qed
+
+
+\subsection{Proof of Lemma~\ref{lem:nrd-mod}}
+\label{subsec:nrd-mod}
+By multiplicativity of the reduced norm,
+\[
+\nrd(\alpha)
+=
+\nrd(\gamma\beta)
+=
+\nrd(\gamma)\nrd(\beta).
+\]
+Since $\gcd(\nrd(\beta),N)=1$, we also have
+$\gcd(\nrd(\beta),N^2)=1$.
+Hence multiplication by $\nrd(\beta)$ does not change the gcd with $N^2$, and therefore
+\[
+\gcd\!\bigl(N^2,\nrd(\alpha)\bigr)
+=
+\gcd\!\bigl(N^2,\nrd(\gamma)\nrd(\beta)\bigr)
+=
+\gcd\!\bigl(N^2,\nrd(\gamma)\bigr)
+=
+N.
+\]
+
+Now write
+\[
+\widetilde{\alpha}=\alpha+N\delta
+\qquad\text{for some }\delta\in\mathcal O_0.
+\]
+Using $\nrd(x)=x\bar x$, we obtain
+\begin{align*}
+\nrd(\widetilde{\alpha})
+&=
+(\alpha+N\delta)(\bar\alpha+N\bar\delta) \\
+&=
+\alpha\bar\alpha
++
+N(\alpha\bar\delta+\delta\bar\alpha)
++
+N^2\delta\bar\delta \\
+&=
+\nrd(\alpha)
++
+N\,\operatorname{tr}(\alpha\bar\delta)
++
+N^2\nrd(\delta).
+\end{align*}
+Because $\delta\in\mathcal O_0$, we have
+\[
+\bar\delta=\operatorname{tr}(\delta)-\delta\in\mathcal O_0,
+\]
+hence $\alpha\bar\delta\in\mathcal O_0$, and therefore
+\[
+\operatorname{tr}(\alpha\bar\delta)\in\mathbb Z.
+\]
+It follows that
+\[
+\nrd(\widetilde{\alpha})
+\equiv
+\nrd(\alpha)
+\pmod N.
+\]
+By Item~1, $N\mid \nrd(\alpha)$, hence also
+\[
+N\mid \nrd(\widetilde{\alpha}).
+\]
+
+Finally, from $\widetilde{\alpha}=\alpha+N\delta$ and $N\delta\in N\mathcal O_0=\mathcal O_0N$, we get
+\[
+\mathcal O_0\widetilde{\alpha}+\mathcal O_0N
+\subseteq
+\mathcal O_0\alpha+\mathcal O_0N.
+\]
+Conversely, since
+\[
+\alpha=\widetilde{\alpha}-N\delta,
+\]
+we also have
+\[
+\mathcal O_0\alpha+\mathcal O_0N
+\subseteq
+\mathcal O_0\widetilde{\alpha}+\mathcal O_0N.
+\]
+Therefore
+\[
+\mathcal O_0\langle \widetilde{\alpha},N\rangle
+=
+\mathcal O_0\langle \alpha,N\rangle.
+\] \qed
+
+\subsection{Proof of Lemma~\ref{lem:RandomIdealGivenNorm-distribution}}
+\label{subsec:RandomIdealGivenNorm-distribution}
+
+More generally, if $a,a'\in \mathcal O_0$ satisfy $a-a'\in N\mathcal O_0$, then
+\[
+\mathcal O_0 a+N\mathcal O_0=\mathcal O_0 a'+N\mathcal O_0.
+\]
+Indeed, writing $a=a'+N\delta$ with $\delta\in\mathcal O_0$, we get
+\[
+\mathcal O_0 a \subseteq \mathcal O_0 a' + N\mathcal O_0,
+\]
+hence
+\[
+\mathcal O_0 a + N\mathcal O_0 \subseteq \mathcal O_0 a' + N\mathcal O_0.
+\]
+The reverse inclusion follows symmetrically from $a'=a-N\delta$.
+
+Now take $a=\gamma\beta$ and $a'=\overline{\gamma\beta}$. By construction,
+\[
+\gamma\beta-\overline{\gamma\beta}\in N\mathcal O_0.
+\]
+Therefore
+\[
+\mathcal O_0(\gamma\beta)+N\mathcal O_0
+=
+\mathcal O_0(\overline{\gamma\beta})+N\mathcal O_0.
+\]
+Thus, for every realization of the random choices, the modified and the original
+algorithms return exactly the same left $\mathcal O_0$-ideal. Consequently their
+output distributions are identical.\\ \qed
+
+\subsection{Proof of Lemma~\ref{lem:latticeinter-bound}}
+\label{subsec:latticeinter-bound}
+
+Lines~5--6 replace \(M_1,M_2\) by LLL-reduced bases of the same lattices.
+Thus \(M_k/r_k\) still generates \(I_k\), and \(|\det M_k|\) is unchanged for
+\(k=1,2\).  By Lemma~\ref{lem:detnrd},
+\[
+  \frac{|\det M_k|}{r_k^4}
+  =
+  \det(I_k)
+  =
+  \det(\calO_0)\nrd(I_k)^2,
+\]
+and hence
+\[
+  |\det M_k|
+  =
+  r_k^4\det(\calO_0)\nrd(I_k)^2.
+\]
+
+We first consider Lines~7--8.  For each \(k\in\{1,2\}\), the input to
+\(\mathsf{LatticeDual}\) is \(M_k/r_k\).  By the corrected adjugate bound,
+\[
+  \|\operatorname{adj}(M_k)\|_\infty
+  \le
+  8p\,\frac{|\det M_k|}{r_k\sqrt{\nrd(I_k)}}.
+\]
+In Line~2 of Algorithm~\ref{alg:LatticeDual}, the numerator of the dual basis is
+computed as
+\[
+  D_k = r_k\operatorname{adj}(M_k)^{\mathsf T},
+\]
+up to the final gcd normalization.
+Hence applying Lemma~\ref{lem:detO0},
+\[
+  \|D_k\|_\infty
+  \le
+  8p\,\frac{|\det M_k|}{\sqrt{\nrd(I_k)}}
+  =
+  2p^2\,r_k^4\nrd(I_k)^{3/2}.
+\]
+The denominator \(s_k\) produced by \(\mathsf{LatticeDual}\) divides
+\(|\det M_k|\), so by Lemma~\ref{lem:detO0}, the calls in Lines~7--8 are bounded by
+\[
+  \max_{k\in\{1,2\}}
+  \left(
+    r_k^4\frac{p}{4}\nrd(I_k)^2,\,
+    2p^2\,r_k^4\nrd(I_k)^{3/2}
+  \right).
+\]
+
+Next consider Lines~9--10.  Since \(s_k\mid |\det M_k|\), we have
+\[
+  s=\operatorname{lcm}(s_1,s_2)
+  \le
+  s_1s_2
+  \le
+  |\det M_1|\,|\det M_2|.
+\]
+Using Lemma~\ref{lem:detnrd} and Lemma~\ref{lem:detO0}, this gives
+\[
+  s
+  \le
+  r_1^4r_2^4\frac{p^2}{16}
+  \nrd(I_1)^2\nrd(I_2)^2.
+\]
+
+Now write the columns of \(D_k\) as \(d_{k,j}\).  Since \(C\) is formed as
+\[
+  C=
+  \left[
+    \frac{s}{s_1}D_1\ \middle|\ \frac{s}{s_2}D_2
+  \right],
+\]
+we have
+\[
+  \frac{s}{s_1}\le s_2\le |\det M_2|,
+  \qquad
+  \frac{s}{s_2}\le s_1\le |\det M_1|.
+\]
+Moreover,
+\[
+  \max_j\|d_{k,j}\|^2
+  \le
+  4\|D_k\|_\infty^2
+  \le
+  256p^2\frac{|\det M_k|^2}{\nrd(I_k)}.
+\]
+Therefore the squared length of every column of \(C\) is bounded by
+\[
+  256p^2\max_{k\in\{1,2\}}\frac{|\det M_k|^2}{\nrd(I_k)}.
+\]
+Substituting
+\[
+  |\det M_k|=r_k^4\det(\calO_0)\nrd(I_k)^2
+\]
+and applying Lemma~\ref{lem:detO0} gives the bound
+\[
+  16p^4\max_{k\in\{1,2\}} r_k^8\nrd(I_k)^3.
+\]
+
+Line~11 applies \(\mathsf{MLLL}\) to \(C\).  By Lemma~\ref{lem:ML2-bound}, the
+integer growth in this step is bounded by the squared length of the largest input
+column, and hence by the coarse bound above.  This is the step where replacing the
+HNF computation by MLLL improves the intermediate-size estimate.
+
+Finally, Line~12 calls \(\mathsf{LatticeDual}\) on \(H/s\), which generates
+\[
+  I_\Sigma=I_1^\# + I_2^\#.
+\]
+The corrected adjugate bound gives
+\[
+  \|\operatorname{adj}(H)\|_\infty
+  \le
+  8p\,\frac{|\det H|}{s\sqrt{\nrd(I_\Sigma)}}.
+\]
+Since Algorithm~\ref{alg:LatticeDual} multiplies the adjugate by \(s\), the numerator
+computed in this call is bounded by
+\[
+  8p\,\frac{|\det H|}{\sqrt{\nrd(I_\Sigma)}}.
+\]
+The denominator is bounded by \(|\det H|\).  Hence Line~12 is bounded by
+\[
+  \max\left(
+    |\det H|,
+    8p\,\frac{|\det H|}{\sqrt{\nrd(I_\Sigma)}}
+  \right).
+\]
+By Lemma~\ref{lem:normintersection}, Lemma~\ref{lem:detnrd}, and Lemma~\ref{lem:detO0}, we have the bound
+\[
+    \max\left(
+    \frac{p}{4}\nrd(I_1)^2\nrd(I_2)^2,
+    2p^2\,\nrd(I_1)\nrd(I_2)
+  \right).
+\]
+
+The remaining lines only perform gcd normalization, coordinate reconstruction, or
+reduction on already bounded data, and do not introduce larger integers in this
+accounting.  Taking the maximum of the contributions above gives the claimed bound
+\(B_{\cap}\). \\ \qed
+
+
+\begin{algorithm}
+\caption{LatticeDual($M,r$)}
+\label{alg:LatticeDual}
+\begin{algorithmic}[1]
+  \Statex \textbf{Input:} A full-rank matrix $L = M/r$ representing a $\frac34$-LLL-reduced basis of a left $\calO_0$-ideal $I$, where $M\in\mathbb{Z}^{4\times 4}$ and $r>0$.
+  % Here the columns of $L$ are coordinates in the basis $(1,i,j,k)$.
+  \Statex \textbf{Output:} A numerator-denominator pair $(M^\#,r^\#)$
+  such that the columns of $M^\#/r^\#$ generate $L^\#$.
+
+  \State $(A,\Delta) \gets \mathsf{AdjugateWithDet}(M)$
+    \Statex \hspace{\algorithmicindent} \Comment{$M^{-1}=A/\Delta$, where $\Delta=\det(M)$}
+  \State $M^\# \gets r A^{\mathsf T}$
+  \State $r^\# \gets \Delta$
+
+  \If{$r^\# < 0$}
+    \State $M^\# \gets -M^\#$
+    \State $r^\# \gets -r^\#$
+  \EndIf
+
+  \State $g \gets \gcd\!\left(r^\#,\{M^\#_{a,b}:1\leq a,b\leq4\}\right)$
+  \State $M^\# \gets M^\#/g,\quad r^\# \gets r^\#/g$
+  \State \textbf{return} $(M^\#,r^\#)$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{lemma}
+\label{lem:dual-bound}
+Assume that L is an LLL-reduced basis of a nonzero integral left \(\mathcal O_0\)-ideal \(I\).
+Then, during the execution of Algorithm~\ref{alg:LatticeDual}, the maximum size
+of integers is at most
+\[
+  \max\left(
+    |\det M|,
+    8p\,\frac{|\det M|}{r\cdot\sqrt{\nrd(I)}}
+  \right).
+\]
+\end{lemma}
+
+\begin{proof}
+Let
+\[
+  (A,\Delta)=\mathsf{AdjugateWithDet}(M),
+  \qquad
+  A=\operatorname{adj}(M),
+  \qquad
+  \Delta=\det(M).
+\]
+By the assumed bound for Algorithm~\ref{alg:AdjugateWithDet}, all integers
+appearing in Line~1 are bounded by
+\[
+  \max\left(
+    |\Delta|,
+    \frac{8p}{r}\,
+    \frac{|\Delta|}{\sqrt{\nrd(rI)}}
+  \right).
+\]
+Moreover,
+\[
+  \|A\|_\infty
+  \le
+  \frac{8p}{r}\,
+  \frac{|\Delta|}{\sqrt{\nrd(rI)}} .
+\]
+
+In Line~2, the algorithm computes
+\[
+  M^\#=rA^{\mathsf T}.
+\]
+Therefore
+\[
+  \|M^\#\|_\infty
+  =
+  r\|A\|_\infty
+  \le
+  8p\,\frac{|\Delta|}{\sqrt{\nrd(rI)}} .
+\]
+Line~3 stores
+\[
+  r^\#=\Delta,
+\]
+whose size is \(|\Delta|=|\det M|\).
+
+The sign correction in Lines~4--7 does not change absolute values.  In Line~8,
+the gcd is computed from \(r^\#\) and the entries of \(M^\#\), so no integer larger
+than
+\[
+  \max\left(
+    |\Delta|,
+    8p\,\frac{|\Delta|}{\sqrt{\nrd(rI)}}
+  \right)
+\]
+is introduced.  Finally, Line~9 divides \(M^\#\) and \(r^\#\) by this gcd, which can
+only decrease their absolute values.
+
+Thus every integer appearing during Algorithm~\ref{alg:LatticeDual} is bounded by
+\[
+  \max\left(
+    |\det M|,
+    8p\,\frac{|\det M|}{r\cdot \sqrt{\nrd(I)}}
+  \right),
+\]
+as claimed.
+\end{proof}
+
+\begin{algorithm}
+\caption{AdjugateWithDet($M$)}
+\label{alg:AdjugateWithDet}
+\begin{algorithmic}[1]
+  \Statex \textbf{Input:} A matrix $M\in\Z^{4\times4}$ representing a $\frac34$-LLL-reduced basis of a left $\calO_0$-ideal $I$.
+  \Statex \textbf{Output:} A pair $(A,\Delta)$ such that
+  $A=\operatorname{adj}(M)$, $\Delta=\det(M)$, and
+  $M^{-1}=A/\Delta$.
+
+  \State $A \gets 0_{4\times 4}$
+
+  \For{$i=1$ to $4$}
+    \For{$j=1$ to $4$}
+      \State $(s_1,s_2,s_3)\gets\mathsf{SORT}(\{1,2,3,4\}\setminus\{i\})$
+      \State $(c_1,c_2,c_3)\gets\mathsf{SORT}(\{1,2,3,4\}\setminus\{j\})$
+      \State Let $N^{(i,j)}=(n_{a,b})_{1\le a,b\le 3}$ be the $3\times 3$ matrix
+      defined by
+      \[
+        n_{a,b}=M_{s_a,s_b}
+        \qquad (1\le a,b\le 3).
+      \]
+      \State $\mu_{i,j} \gets
+      n_{1,1}(n_{2,2}n_{3,3}-n_{2,3}n_{3,2})
+      -n_{1,2}(n_{2,1}n_{3,3}-n_{2,3}n_{3,1})
+      +n_{1,3}(n_{2,1}n_{3,2}-n_{2,2}n_{3,1})$
+      \State $A_{j,i} \gets (-1)^{i+j}\mu_{i,j}$
+    \EndFor
+  \EndFor
+
+  \State $\Delta \gets
+  m_{1,1}A_{1,1}
+  +m_{1,2}A_{2,1}
+  +m_{1,3}A_{3,1}
+  +m_{1,4}A_{4,1}$
+
+  \If{$\Delta=0$}
+    \State \textbf{error} ``$M$ is not full rank''
+  \EndIf
+
+  \State \textbf{return} $(A,\Delta)$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{lemma}
+\label{lem:adjugate-bound}
+During the execution of Algorithm~\ref{alg:AdjugateWithDet}, the maximum size of integers is less than \[\max\left(|\det M|,\,\frac{8p}{r}\,\frac{|\det M|}{\sqrt{\nrd(I)}}\right).\]
+\end{lemma}
+
+\begin{proof}
+It is clear that the maximum size of integers appears in line~11.
+Since $\Delta = \det(M)$, by Lemma~\ref{lem:adjugate-lll-O0-bound}, we have the maximum size of integers
+\[\max\left(|\det M|,\,p\,\frac{|\det(M)|}{\sqrt{\nrd(I)}}\right).\]
+\end{proof}
+
+\begin{lemma}[Adjugate bound for LLL-reduced \(\mathcal O_0\)-ideal bases]
+\label{lem:adjugate-lll-O0-bound}
+Let $G_0$ be the Gram matrix of $\nrd$ in the basis $(1,i,j,k)$.
+Set
+\[
+  C_0
+  :=
+  8\,\frac{\sqrt{\det(G_0)}}{\lambda_0^{3/2}}
+  =
+  8p.
+\]
+
+Let \(I\subseteq \mathcal O_0\) be a nonzero proper integral left
+\(\mathcal O_0\)-ideal, and let
+$(\alpha_1,\ldots,\alpha_4)$ be a \(3/4\)-LLL-reduced basis of \(I\).
+Let
+\[
+  \frac{M}{r}\in\mathbb Q^{4\times 4},
+  \qquad M\in\mathbb Z^{4\times 4},\quad r>0,
+\]
+be the coordinate matrix; that is,
+the \(\ell\)-th column of \(M/r\) is the \((1,i,j,k)\)-coordinate vector of \(\alpha_\ell\).
+Then, the stored entries of \(\operatorname{adj}(M)\) and \(\det(M)\) are
+bounded by
+\[
+  \max\left(
+    |\det M|,\,
+    \frac{8p}{r}\,\frac{|\det M|}{\sqrt{\nrd(I)}}
+  \right).
+\]
+\end{lemma}
+
+\begin{proof}
+Let \(\|\cdot\|_{\nrd}\) be the Euclidean norm induced by \(\nrd\), so that
+\[
+  \|\alpha\|_{\nrd}^2=\nrd(\alpha).
+\]
+If \(m/r\in\mathbb R^4\) is the \((1,i,j,k)\)-coordinate vector of \(\alpha\), then
+\[
+  \|\alpha\|_{\nrd}^2
+  =
+  (m/r)^{\mathsf T}G_0(m/r).
+\]
+Since \(\lambda_0=\lambda_{\min}(G_0)=1\), we have
+\[
+  \|m\|_2
+  \le
+  r\,\|\alpha\|_{\nrd}.
+\]
+
+Let \(m_1,\ldots,m_4\in\mathbb Z^4\) be the columns of \(M\), corresponding to
+\(\alpha_1,\ldots,\alpha_4\).  The \((j,i)\)-entry of
+\(\operatorname{adj}(M)\) is, up to sign, the determinant of the \(3\times 3\)
+minor obtained by deleting row \(i\) and column \(j\).  This determinant is the
+volume of the projection of the three vectors \(m_\ell\), \(\ell\neq j\), onto a
+coordinate hyperplane.  By Hadamard's inequality,
+\[
+  \left|\operatorname{adj}(M)_{j,i}\right|
+  \le
+  \prod_{\ell\neq j}\|m_\ell\|_2 .
+\]
+Using the comparison between the standard Euclidean norm on numerator
+coordinates and \(\|\cdot\|_{\nrd}\), we obtain
+\[
+  \left|\operatorname{adj}(M)_{j,i}\right|
+  \le
+  r^3
+  \prod_{\ell\neq j}\|\alpha_\ell\|_{\nrd}.
+\]
+
+Since \(\alpha_1,\ldots,\alpha_4\) is LLL-reduced, its orthogonality
+defect is bounded by
+\[
+  \prod_{\ell=1}^4 \|\alpha_\ell\|_{\nrd}
+  \le
+  2^{4\cdot 3/4}\operatorname{covol}_{\nrd}(I)
+  =
+  8\,\operatorname{covol}_{\nrd}(I).
+\]
+Moreover,
+\[
+  \operatorname{covol}_{\nrd}(I)
+  =
+  \sqrt{\det\!\left((M/r)^{\mathsf T}G_0(M/r)\right)}
+  =
+  \frac{|\det M|}{r^4}\sqrt{\det(G_0)}
+  =
+  \frac{p|\det M|}{r^4}.
+\]
+
+We now use the ideal structure.  Since the norm ideal \(\nrd(I)\) is generated by
+the reduced norms of elements of \(I\), every nonzero \(\alpha\in I\) satisfies
+\[
+  \nrd(\alpha)\in \nrd(I)\mathbb Z_{>0}.
+\]
+As \(B_{p,\infty}\) is definite, this implies
+\[
+  \|\alpha\|_{\nrd}
+  =
+  \sqrt{\nrd(\alpha)}
+  \ge
+  \sqrt{\nrd(I)}.
+\]
+In particular,
+\[
+  \prod_{\ell\neq j}\|\alpha_\ell\|_{\nrd}
+  =
+  \frac{\prod_{\ell=1}^4\|\alpha_\ell\|_{\nrd}}
+       {\|\alpha_j\|_{\nrd}}
+  \le
+  \frac{8\,\operatorname{covol}_{\nrd}(I)}{\sqrt{\nrd(I)}}
+  =
+  \frac{8p|\det M|}{r^4\sqrt{\nrd(I)}}.
+\]
+Therefore
+\[
+  \left|\operatorname{adj}(M)_{j,i}\right|
+  \le
+  r^3
+  \frac{8p|\det M|}{r^4\sqrt{\nrd(I)}}
+  =
+  \frac{8p}{r}\,
+  \frac{|\det M|}{\sqrt{\nrd(I)}}.
+\]
+Taking the maximum over all \(i,j\) proves the adjugate bound.
+
+The determinant \(\det(M)\) is also stored during
+Algorithm~\ref{alg:AdjugateWithDet}, so the stored entries of
+\(\operatorname{adj}(M)\) and \(\det(M)\) are bounded by
+\[
+  \max\left(
+    |\det M|,\,
+    \frac{8p}{r}\,\frac{|\det M|}{\sqrt{\nrd(I)}}
+  \right).
+\]
+\end{proof}
+
+% \section{Analysis on Minkowski-reduced Basis Computation}
+% \label{sec:minkowski}
+
+% An algorithm for computing the Minkowski-reduced basis, given a lattice and its basis is as follows: (Algorithm~\ref{alg:Minkowski})
+
+% \begin{algorithm}[H]
+% \caption{Minkowski($b_1,\ldots,b_d$)~\cite[Section~4.1]{NS09}}
+% \label{alg:Minkowski}
+% \begin{algorithmic}[1]
+%   \Statex \textbf{Input:} A basis $(b_1,\ldots,b_d)$ with $d\le4$.
+%   % with its Gram matrix $G=(g_{i,j})_{1\le i,j\le d}$ and $d\le4$.
+%   \Statex \textbf{Output:} An ordered basis of $L[b_1,\ldots,b_d]$.
+
+%   \If{$d=1$}
+%     \State \textbf{return} $b_1$
+%   \EndIf
+%   \Repeat
+%     \State $(b_1,\ldots,b_d) \gets \mathbf{LLL}(b_1,\dots,b_d;\delta=\frac 34)$
+%     \State Compute the Gram matrix $G$ of $(b_1,\dots,b_d)$
+%     \State $(b_1,\ldots,b_{d-1}) \gets \mathbf{Minkowski}(b_1,\ldots,b_{d-1})$
+%     \State $c \gets \mathbf{ExactPrefixCVP}\left((b_1,\dots,b_{d-1}), b_d\right)$
+%     % \State Compute a vector $c \in L[b_1,\ldots,b_{d-1}]$ closest to $b_d$
+%     \State $b_d \gets b_d - c$ and update the Gram matrix efficiently
+%   \Until{$\|b_d\| \ge \|b_{d-1}\|$}
+%   \State \textbf{return} $[b_1,\ldots,b_d]_{\le}$
+% \end{algorithmic}
+% \end{algorithm}
+
+% \begin{lemma}
+% \label{lem:minkowski-bound}
+% During the execution of Algorithm~\ref{alg:Minkowski} with an input basis $(b_1,\dots,b_d)$ of a lattice $I$ in $B_{p,\infty}$, the size of integers is less than
+% \[\|b_d^\ast\|^2+9(d-1)^2\|b^\star_{d-1}\|^2,\]
+% where $(b^\ast_1,\dots,b^\ast_d)$ is an LLL-reduced basis and $(b^\star_1,\dots,b^\star_d)$ is a Minkowski-reduced basis of $I$.
+% \end{lemma}
+
+% \begin{proof}
+% \noindent\textbf{(1) Lines 5--6.}
+% In line~5, computing LLL-reduced basis does not increase the maximum size of integers. (e.g. See~\cite[Lemma~21]{KLKL25})
+% In line~6, computing Gram matrix, the maximum size of integers is $\|b_d^\ast\|^2$.
+
+% \smallskip
+% \noindent\textbf{(2) Lines 7--9.}
+% In line~8, the maximum size of integers during the execution of \textbf{ExactPrefixCVP} is less than
+% \[ \|b_d^\ast\|^2 + 9(d-1)^2\|b_{d-1}^\star\|^2, \]
+% by Lemma~\ref{lem:cvp-bound}.
+% In line~9, it is trivial that the size of integers does not grow when reducing the size of $b_d$, by subtracting the closest vector of $b_d$ to the lattice generated by $(b_1,\dots,b_{d_1})$.
+
+% \end{proof}
+
+
+% \begin{algorithm}[!t]
+% \caption{ExactPrefixCVP($B,t$)~\cite[Section~5]{NS09}}
+% \label{alg:ExactPrefixCVP}
+% \begin{algorithmic}[1]
+% \Require $B = (b_1,\dots,b_m)$ is a Minkowski-reduced basis; 
+%          $t \in \mathbb{R}^n$; $\|b_i\| < \|t\|$ for all $i$
+% \Ensure A vector $c^\star \in L(B)$ minimizing $\|t - c^\star\|$, where
+%         $L(B) = \left\{\sum_{i=1}^m z_i b_i : z_i \in \mathbb{Z}\right\}$.
+%     \If{$m = 1$}
+%         \State $\alpha \gets \dfrac{\langle b_1,t\rangle}{\langle b_1,b_1\rangle}$
+%         \State $x^\star \gets \lfloor\alpha\rceil$
+%         \State \Return $x^\star b_1$
+%     \EndIf
+
+%     \State $\mathbf{G} \gets \bigl(\langle b_i,b_j\rangle\bigr)_{1 \le i,j \le m}$
+%     \State $\mathbf{v} \gets \bigl(\langle b_1,t\rangle,\dots,\langle b_m,t\rangle\bigr)^\top$
+%     % \State Compute $\widetilde{\mathbf y}$ such that there exists a unique $\mathbf y$ with $\mathbf G\mathbf y=\mathbf v$ and $\|\widetilde{\mathbf y}-\mathbf y\|_\infty \le 1/2$
+%     \State $\mathbf y \gets \mathbf{G}^{-1}\mathbf v$, \quad $y_i \gets \mathbf y _i$
+%     \State $\mathcal{S} \gets \displaystyle\prod_{i=1}^m
+%            \left\{\lfloor y_i \rfloor - 2,\,
+%                   \lfloor y_i \rfloor - 1,\,
+%                   \lfloor y_i \rfloor,\,
+%                   \lfloor y_i \rfloor + 1,\,
+%                   \lfloor y_i \rfloor + 2
+%            \right\}$
+
+%     \State $d^\star \gets +\infty$, $c^\star \gets 0$, $\mathbf{x}^\star \gets \bot$
+
+%     \ForAll{$\mathbf{x} = (x_1,\dots,x_m) \in \mathcal{S}$}
+%         \State $c \gets \sum_{i=1}^m x_i b_i$
+%         \State $d \gets \|t - c\|^2$
+%         \If{$d < d^\star$}
+%             \State $d^\star \gets d$
+%             \State $c^\star \gets c$
+%             \State $\mathbf{x}^\star \gets \mathbf{x}$
+%         \EndIf
+%     \EndFor
+
+%     \State \Return $c^\star$
+% \end{algorithmic}
+% \end{algorithm}
+
+% \begin{lemma}
+% \label{lem:cvp-bound}
+% During the execution of Algorithm~\ref{alg:ExactPrefixCVP}, the maximum size of integers is less than $\|t\|^2 + 81\cdot\|b_m\|^2$.
+% \end{lemma}
+
+% \begin{proof}
+% Let $T := \|t\|$.
+
+% \smallskip
+% \noindent\textbf{(1) Lines 1--5.}
+% If $m=1$, then
+% \[
+% \alpha=\frac{\langle b_1,t\rangle}{\langle b_1,b_1\rangle},
+% \qquad
+% |\langle b_1,t\rangle| \le \|b_1\|\,\|t\| < T^2,
+% \qquad
+% 0<\langle b_1,b_1\rangle=\|b_1\|^2<T^2.
+% \]
+% Thus the numerator and denominator occurring in $\alpha$ are bounded by $T^2$. Moreover,
+% \[
+% |\alpha| \le \frac{\|b_1\|\,\|t\|}{\|b_1\|^2}=\frac{T}{\|b_1\|},
+% \]
+% so the nearest integer $x^\star$ satisfies
+% \[
+% |x^\star| \le |\alpha|+\tfrac12 = \frac{T}{\|b_1\|}+\frac12 \le T+\frac12,
+% \]
+% since we treat only integer vectors. Hence
+% \[
+% \|x^\star b_1\| \le (|\alpha|+\tfrac12)\|b_1\|
+% = T+\frac12\|b_1\|.
+% \]
+
+% \smallskip
+% \noindent\textbf{(2) Lines 6--7.}
+% Assume now that $m\ge 2$.
+% In lines 6--7, we form the Gram matrix
+% \[
+% \mathbf G=(\langle b_i,b_j\rangle)_{1\le i,j\le m}
+% \qquad\text{and}\qquad
+% \mathbf v=(\langle b_1,t\rangle,\ldots,\langle b_m,t\rangle)^{\top}. 
+% \]
+% By Cauchy--Schwarz and the hypothesis $\|b_i\|<T$ for every $i$,
+% \[
+% |G_{ij}| = |\langle b_i,b_j\rangle|
+%  \le \|b_i\|\,\|b_j\| < T^2,
+% \qquad
+% |v_i| = |\langle b_i,t\rangle|
+%  \le \|b_i\|\,T < T^2.
+% \]
+% So all integers appearing in $\mathbf G$ and $\mathbf v$ are less than $T^2$.
+
+% \smallskip
+% \noindent\textbf{(3) Line 8.}
+% Because $B$ is Minkowski-reduced and the dimension $m$ satisfies $m \le 4$, by Minkowski's second theorem, we have
+% \[
+% |y_i|\le \|d_i\|\,T
+% \le \frac{32}{\pi^2}\cdot\frac{T}{\|b_i\|}.
+% \]
+% During the compuataion of $\mathbf{G}^{-1}$, since $G$ is the Gram matrix, the maximum size of integers, which occurs by the computation of determinant is less than
+% \[ \prod_{i=1}^d \|b_i\|^2 \le \frac{32p^2}{\pi^4}\nrd(I)^2, \]
+% by Minkowski's second theorem, where $(b_1,b_2,b_3,b_4)$ is a basis of $I$.
+
+% \smallskip
+% \noindent\textbf{(4) Line 12.}
+% Fix such an $\mathbf x$, and write $c=B\mathbf x$.
+% Because $\mathbf x\in\mathcal S$, for each $i$ we have
+% \[
+% x_i\in \{\lfloor y_i\rfloor-2,\lfloor y_i\rfloor-1,\lfloor y_i\rfloor,
+% \lfloor y_i\rfloor+1,\lfloor y_i\rfloor+2\},
+% \]
+% Hence, $\|x_i- y_i\| \le 3$, for each $i$.
+% By $|x_i|\le |y_i|+2$ we have
+% \[
+% |x_i|\le \frac{32}{\pi^2}\cdot\frac{T}{\|b_i\|}+2 \le \frac{32}{\pi^2}T+2,
+% \]
+% since $L(B)$ is integral so $\|b_i\| \ge 1$ and
+% It follows that
+% \[
+% B(\mathbf x-\mathbf y)=\sum_{i=1}^m (x_i-y_i)b_i,
+% \]
+% so by the triangle inequality,
+% \[
+% \|B(\mathbf x-\mathbf y)\|
+% \le \sum_{i=1}^m |x_i-y_i|\,\|b_i\|
+% \le 3\sum_{i=1}^m \|b_i\|
+% \le 3m \max_{1\le i\le m}\|b_i\|
+% = 3m \|b_3\|.
+% \]
+
+% Also, since $\mathbf y=\mathbf G^{-1}\mathbf v$ with $\mathbf G=B^\top B$ and
+% $\mathbf v=B^\top t$, we have
+% \[
+% B^\top(t-B\mathbf y)=\mathbf v-\mathbf G\mathbf y=0.
+% \]
+% Thus $t-B\mathbf y$ is orthogonal to $\mathrm{span}(B)$, while
+% $B(\mathbf y-\mathbf x)\in \mathrm{span}(B)$. Therefore
+% \[
+% \|t-c\|^2
+% = \|t-B\mathbf y\|^2 + \|B(\mathbf y-\mathbf x)\|^2.
+% \]
+% Since $B\mathbf y$ is the orthogonal projection of $t$ onto $\mathrm{span}(B)$,
+% \[
+% \|t-B\mathbf y\|\le \|t\|=T,
+% \]
+% and hence
+% \[
+% \|t-c\|^2 \le T^2 + (3m\cdot\|b_3\|)^2.
+% \]
+% Therefore, we have
+% \[
+% \|c\|\le \|t\|+\|t-c\| \le \bigl(1+\sqrt{1+9m^2}\bigr)T < 14T.
+% \]
+
+% \end{proof}
+
+
+% \begin{algorithm}[H]
+% \caption{Inverse3x3($A$)}
+% \label{alg:Inverse}
+% \begin{algorithmic}[1]
+%   \Statex \textbf{Input:} A matrix
+%   \[
+%     A=
+%     \begin{pmatrix}
+%       a_{11} & a_{12} & a_{13}\\
+%       a_{21} & a_{22} & a_{23}\\
+%       a_{31} & a_{32} & a_{33}
+%     \end{pmatrix}
+%     \in \mathbb{Q}^{3\times 3}.
+%   \]
+%   \Statex \textbf{Output:} $A^{-1}$ if $A$ is nonsingular.
+
+%   \State $\Delta \gets a_{11}(a_{22}a_{33}-a_{23}a_{32})
+%           - a_{12}(a_{21}a_{33}-a_{23}a_{31})
+%           + a_{13}(a_{21}a_{32}-a_{22}a_{31})$
+%   \If{$\Delta = 0$}
+%     \State \textbf{error} ``$A$ is singular''
+%   \EndIf
+
+%   \State $C_{11} \gets \phantom{-}(a_{22}a_{33}-a_{23}a_{32})$
+%   \State $C_{12} \gets -(a_{21}a_{33}-a_{23}a_{31})$
+%   \State $C_{13} \gets \phantom{-}(a_{21}a_{32}-a_{22}a_{31})$
+
+%   \State $C_{21} \gets -(a_{12}a_{33}-a_{13}a_{32})$
+%   \State $C_{22} \gets \phantom{-}(a_{11}a_{33}-a_{13}a_{31})$
+%   \State $C_{23} \gets -(a_{11}a_{32}-a_{12}a_{31})$
+
+%   \State $C_{31} \gets \phantom{-}(a_{12}a_{23}-a_{13}a_{22})$
+%   \State $C_{32} \gets -(a_{11}a_{23}-a_{13}a_{21})$
+%   \State $C_{33} \gets \phantom{-}(a_{11}a_{22}-a_{12}a_{21})$
+
+%   \State $A^{-1} \gets \dfrac{1}{\Delta}
+%     \begin{pmatrix}
+%       C_{11} & C_{21} & C_{31}\\
+%       C_{12} & C_{22} & C_{32}\\
+%       C_{13} & C_{23} & C_{33}
+%     \end{pmatrix}$
+
+%   \State \Return $A^{-1}$
+% \end{algorithmic}
+% \end{algorithm}

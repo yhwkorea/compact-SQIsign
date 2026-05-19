@@ -1,0 +1,186 @@
+\section{Implementation}
+
+
+\begin{algorithm}
+\caption{\textsf{LazySizeReduce}$(\kappa,\zeta,(b_1,\dots,b_d),G,\bar r,\bar\mu)$~\cite[Figure~5]{NS09}}
+\label{alg:lazy-size-reduction}
+\begin{algorithmic}[1]
+  \Statex \textbf{Input:} An index $\kappa$, vectors
+  $(b_{\zeta+1},\dots,b_\kappa)$, their Gram matrix $G$, floating-point numbers
+  $\bar r_{i,j}$ and $\bar\mu_{i,j}$ for $\zeta+1\le j\le i<\kappa$,
+  and fp-precision $\ell+1=53$.
+  \Statex \textbf{Output:} Updated $b_\kappa$, $G$, and floating-point numbers
+  $\bar r_{\kappa,j}$, $\bar\mu_{\kappa,j}$, and
+  $\bar s^{(\kappa)}_j$ for $\zeta+1\le j\le \kappa$.
+
+  \State $\bar\eta \gets \diamond(\diamond(0.55)+1/2)/2$.
+  \State Compute the $\bar r_{\kappa,j}$'s, $\bar\mu_{\kappa,j}$'s, and
+  $\bar s^{(\kappa)}_j$'s with steps 2--7 of the CFA with ``$i=\kappa$''
+  for the vectors $b_{\zeta+1},\dots,b_\kappa$.
+  \If{$\max_{\zeta+1\le j<\kappa} |\bar\mu_{\kappa,j}| \le \bar\eta$}
+    \State \Return $(b_\kappa,G,\bar r_{\kappa,*},\bar\mu_{\kappa,*},\bar s^{(\kappa)}_*)$.
+  \Else
+    \For{$i=\kappa-1$ \textbf{down to} $\zeta+1$}
+      \State $X_i \gets \lfloor \bar\mu_{\kappa,i}\rceil$.
+      \For{$j=\zeta+1$ \textbf{to} $i-1$}
+        \State $\bar\mu_{\kappa,j}\gets
+        \diamond\!\left(\bar\mu_{\kappa,j}
+        -\diamond(X_i\bar\mu_{i,j})\right)$.
+      \EndFor
+    \EndFor
+    \State $b_\kappa \gets b_\kappa-\sum_{i=\zeta+1}^{\kappa-1}X_i b_i$,
+    and update $G$ accordingly.
+    \State \textbf{go to} line 2.
+  \EndIf
+\end{algorithmic}
+\end{algorithm}
+
+% \begin{algorithm}
+% \caption{\textsf{ML2}$(b_1,\dots,b_d)$~\cite[Figure~9]{NS09}}
+% \label{alg:ML2}
+% \begin{algorithmic}[1]
+%   \Statex \textbf{Input:} Nonzero vectors
+%   $(b_1,\dots,b_d)\subset \mathbb{Z}^4$ generating a rank-$4$ lattice, and
+%   fp-precision $\ell+1=53$.
+%   \Statex \textbf{Output:} An $L^3$-reduced basis $(b'_1,\dots,b'_4)$.
+
+%   \State Compute exactly $G=G(b_1,\dots,b_d)$.
+%   \State $\bar\delta\gets \diamond(\diamond(3/4)+1)/2,\quad
+%   \bar r_{1,1}\gets \diamond(\langle b_1,b_1\rangle),\quad
+%   \kappa\gets 2,\quad \zeta\gets 0$.
+%   \While{$\kappa\le d$}
+%     \State $(b_\kappa,G,\bar r_{\kappa,*},\bar\mu_{\kappa,*},
+%     \bar s^{(\kappa)}_*) \gets
+%     \textsf{LazySizeReduce}(\kappa,\zeta,(b_1,\dots,b_d),G,\bar r,\bar\mu)$.
+%     \State $\kappa'\gets \kappa$.
+%     \While{$\kappa\ge \zeta+2$ \textbf{and}
+%     $\diamond(\bar\delta\cdot \bar r_{\kappa-1,\kappa-1})
+%     \ge \bar s^{(\kappa')}_{\kappa-1}$}
+%       \State $\kappa\gets \kappa-1$.
+%     \EndWhile
+%     \For{$i=\zeta+1$ \textbf{to} $\kappa-1$}
+%       \State $\bar\mu_{\kappa,i}\gets \bar\mu_{\kappa',i},\quad
+%       \bar r_{\kappa,i}\gets \bar r_{\kappa',i}$.
+%     \EndFor
+%     \State $\bar r_{\kappa,\kappa}\gets \bar s^{(\kappa')}_\kappa$.
+%     \State Insert $b_{\kappa'}$ right before $b_\kappa$ and update $G$ accordingly.
+%     \If{$b_\kappa=0$}
+%       \State $\zeta\gets \zeta+1$.
+%     \EndIf
+%     \State $\kappa\gets \max(\zeta+2,\kappa+1)$.
+%   \EndWhile
+%   \State \Return $(b_{\zeta+1},\dots,b_d)$.
+% \end{algorithmic}
+% \end{algorithm}
+
+\begin{remark}
+We restrict our setting to full-rank lattices in dimension $4$, hence
+$k=\dim L=4$.
+\cite[Figure~9, Theorem~10]{NS09} states its correctness with respect to the lattice rank $k=\dim L$ under the valid-pair condition
+\[
+  \frac14 < \delta < 1,
+  \qquad
+  \frac12 < \eta < \sqrt{\delta}.
+\]
+The choice $\eta=0.55$ is not merely arbitrary within the admissible interval; it is the exact value paired with $\delta=0.75$ in Section~3.4, Figure~7 of~\cite{NS09}.
+Moreover, by~\cite[Figure~7]{NS09}, for $(\delta,\eta)=(0.75,0.55)$, double precision with $\ell=52$ is valid up to dimension $11$.
+\end{remark}
+
+% \begin{lemma}[Integer-size bound for \textsf{ML2}]
+% \label{lem:ML2-bound}
+% During the execution of Algorithm~\ref{alg:ML2}, the maximum size of integers is less than $\max_{1\le i\le d} || b_i ||^2$.
+% \end{lemma}
+
+\begin{proof}
+The exact integer objects in Algorithm~\ref{alg:ML2} are the vectors $b_i$, or
+equivalently the exact integral Gram matrix $G$. The quantities
+$\bar r_{i,j}$, $\bar\mu_{i,j}$, $\bar s^{(\kappa)}_j$, and $\bar\delta$ are
+fixed-precision floating-point numbers, and the indices $\kappa,\zeta$ do not
+affect the integer-size bound.
+
+We check the only steps that can affect exact integer data.
+
+\smallskip
+\noindent\textbf{(1) Initialization.}
+In line~1, the algorithm computes
+\[
+  G_{i,j}=\langle b_i,b_j\rangle .
+\]
+By Cauchy--Schwarz,
+\[
+  |G_{i,j}|
+  \le \|b_i\|\,\|b_j\|.
+\]
+
+\smallskip
+\noindent\textbf{(2) Lazy size-reduction.}
+Line~4 calls Algorithm~\ref{alg:lazy-size-reduction}. By
+Lemma~\ref{lem:lazy-size-reduction-bound}, this subroutine does not increase
+the size of any exact integer object beyond $B_{\rm in}$.
+
+\smallskip
+\noindent\textbf{(3) Insertion and remaining updates.}
+Lines~5--12 only compare or copy floating-point quantities. Line~13 inserts
+$b_{\kappa'}$ right before $b_\kappa$ and updates $G$ accordingly; this is just
+a permutation of the current vectors and of the corresponding rows and columns
+of $G$, so it creates no new integer magnitude. Lines~14--17 only test whether
+$b_\kappa=0$ and update the indices $\zeta$ and $\kappa$.
+
+Therefore every iteration of Algorithm~\ref{alg:ML2} preserves the invariant
+that all exact integer objects are bounded by $B_{\rm in}$. Since the invariant
+holds after initialization, it holds throughout the algorithm. Hence the exact
+integer size in Algorithm~\ref{alg:ML2} is bounded by
+\[
+  \boxed{
+  \max_{1\le i\le d}\|b_i\|^2
+  } .
+\]
+\end{proof}
+
+\begin{lemma}[Integer-size bound for \textsf{LazySizeReduce}]
+\label{lem:lazy-size-reduction-bound}
+Let
+\[
+  B_{\rm in}:=\max_{1\le i\le d}\|b_i\|^2
+\]
+be the initial input bound of Algorithm~\ref{alg:ML2}. Assume that before a
+call to Algorithm~\ref{alg:lazy-size-reduction}, every exact integer object
+currently stored by the algorithm, namely the vector representation or
+equivalently the exact Gram-matrix representation, is bounded by $B_{\rm in}$.
+Then the returned objects
+\[
+  b_\kappa,\qquad G,\qquad
+  \bar r_{\kappa,*},\quad \bar\mu_{\kappa,*},\quad
+  \bar s^{(\kappa)}_*
+\]
+do not increase the exact integer size beyond $B_{\rm in}$.
+\end{lemma}
+
+\begin{proof}
+Algorithm~\ref{alg:lazy-size-reduction} manipulates two types of data: exact
+integer data, namely $b_\kappa$ and the Gram matrix $G$, and fixed-precision
+floating-point data, namely $\bar r$, $\bar\mu$, $\bar s$, and $\bar\eta$.
+The floating-point quantities do not contribute to the integer-size bound.
+
+Line~1 only assigns the floating-point value $\bar\eta$. Line~2 computes the
+floating-point GSO quantities by the CFA procedure, using $G$ only as exact
+input data and producing only rounded floating-point values. Hence lines~1--4
+do not create any new exact integer magnitude.
+
+The only nontrivial exact integer update occurs in lines~6--11, where
+\[
+  X_i\gets \lfloor \bar\mu_{\kappa,i}\rceil,
+  \qquad
+  b_\kappa\gets b_\kappa-\sum_{i=\zeta+1}^{\kappa-1}X_i b_i,
+\]
+and the exact Gram matrix $G$ is updated accordingly. This is precisely the
+SizeReduce operation analyzed in~\cite{KLKL25}. By the SizeReduce integer-size
+bound, this update does not increase the fixed exact-integer budget: after the
+update, the reduced vector $b_\kappa$, or equivalently the updated row and
+column of $G$, is again represented within the bound $B_{\rm in}$. All other
+rows and columns of $G$ are unchanged.
+
+Finally, line~12 only repeats the same procedure. Therefore, by induction over
+the repetitions of Algorithm~\ref{alg:lazy-size-reduction}, the subroutine
+returns without increasing the exact integer size beyond $B_{\rm in}$.
+\end{proof}

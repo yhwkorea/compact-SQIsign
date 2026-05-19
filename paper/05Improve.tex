@@ -1,0 +1,242 @@
+\section{Improved fixed-precision integer arithmetic}
+\label{sec:improve}
+
+In this section, we combine the local bounds obtained in the previous sections into global fixed-precision requirements for SQIsign.
+In subsection~\ref{subsec:bound}, we propagate these bounds through the full key generation and signing procedures, thereby deriving new uniform worst-case precision bounds that are sufficient for fixed-precision integer arithmetic.
+In subsection~\ref{subsec:performance}, we evaluate how the reduced precision affects the practical performance of SQIsign.
+
+\subsection{Improved uniform bounds}
+\label{subsec:bound}
+
+First, we compute the uniform bound on the key generation of SQIsign with our compact quaternion algorithms. (Algorithm~\ref{alg:KeyGen})
+
+\begin{algorithm}
+\caption{KeyGen($\pp$)}\label{alg:KeyGen}
+\textbf{Input :} The public parameter $\pp$.\\
+\textbf{Output:}  Secret key $\mathit{sk}$ and public key $\mathit{pk}$.
+\begin{algorithmic}[1]
+\While{true}
+  \State $I_{\mathrm{sk}} \gets \textsf{RandomIdealGivenPrimeNorm}(D_{\text{mix}})$
+  \State \textbf{try}
+  \State \quad $I_{\mathrm{sk}} \gets \textsf{RandomEquivalentPrimeIdeal}(I_{\mathrm{sk}})$
+  \State \quad $E_{\mathrm{pk}},\, \varphi_{\mathrm{sk}}(P_{0}),\, \varphi_{\mathrm{sk}}(Q_{0})
+         \gets \textsf{IdealToIsogeny}(I_{\mathrm{sk}})$
+  \State \textbf{except}
+  \State \quad \textbf{continue}
+  \State $P_{\mathrm{pk}},\, Q_{\mathrm{pk}},\, \mathit{hint}_{\mathrm{pk}}
+         \gets \textsf{TorsionBasisToHint}(E_{\mathrm{pk}})$
+  \State $M_{\mathrm{sk}} \gets \textsf{ChangeOfBasis}_{2^{f}}\!\Big(E_{\mathrm{pk}},
+        \big(\varphi_{\mathrm{sk}}(P_{0}),\varphi_{\mathrm{sk}}(Q_{0})\big),
+        \big(P_{\mathrm{pk}},Q_{\mathrm{pk}}\big)\Big)$
+  \State $\mathit{pk} \gets \big(E_{\mathrm{pk}},\, \mathit{hint}_{\mathrm{pk}}\big)$
+  \State $\mathit{sk} \gets \big(E_{\mathrm{pk}},\, \mathit{hint}_{\mathrm{pk}},\, I_{\mathrm{sk}},\, M_{\mathrm{sk}}\big)$
+  \State \Return $\mathit{sk},\, \mathit{pk}$
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
+
+\begin{theorem}[Improved KeyGen bound]
+\label{thm:keygen-bound}
+During the execution of Algorithm~\ref{alg:KeyGen}, the maximum size of integers is less than $16p^4$.
+\end{theorem}
+
+\begin{proof}
+By Lemma~\ref{lem:RandomIdealGivenNorm-bound}, the maximum size of integers in line~2 is at most
+\[ 4\cdot\Dmix^2 < 2^{24}p^4. \footnotemark \]
+\footnotetext{One can easily check that $\Dmix < 2^{10}p^2$.}
+By Lemma~\ref{lem:RandomEquivalentPrimeIdeal-bound} and Lemma~\ref{lem:IdealToIsogeny-bound}, the maximum size of integers in line~5 is at most
+\[\frac{2^{43.5}}{\pi^4}p^2\log{p}.\]
+For other lines, following the proof of~\cite[Theorem~1]{KLKL25}, the maximum size of integers is less than $2^{24}p^4$.
+So we conclude the proof.
+\end{proof}
+
+Now we compute the uniform bound on the signing process of SQIsign with our compact quaternion algorithms. (Algorithm~\ref{alg:Sign})
+
+\begin{algorithm}[!t]
+\footnotesize
+\caption{Sign($sk, msg$)}\label{alg:Sign}
+
+\textbf{Input:}  Secret signing key $sk$ and message $msg\in\{0,1\}^*$.\\
+\textbf{Output:} Signature $\sigma$.
+\begin{algorithmic}[1]
+\State Parse $sk$ as $(E_{\mathrm{pk}},\, \mathit{hint}_{\mathrm{pk}},\, I_{\mathrm{sk}},\, M_{\mathrm{sk}})$
+\State $P_{\mathrm{pk}},Q_{\mathrm{pk}} \gets \textsf{TorsionBasisFromHint}(E_{\mathrm{pk}}, \mathit{hint}_{\mathrm{pk}})$
+\While{true}
+  \Statex \hspace{\algorithmicindent}\textit{// Commitment}
+  \State $I_{\mathrm{com}} \gets \textsf{RandomIdealGivenPrimeNorm}(D_{\mathrm{mix}}, \textit{true})$
+  \State \textbf{try}
+  \State \quad $I_{\mathrm{com}} \gets \textsf{RandomEquivalentPrimeIdeal}(I_{\mathrm{com}})$
+  \State \quad $E_{\mathrm{com}}, P_{\mathrm{com}}, Q_{\mathrm{com}} \gets \textsf{IdealToIsogeny}(I_{\mathrm{com}})$
+  \State \textbf{except}
+  \State \quad \textbf{continue}
+
+  \Statex \hspace{\algorithmicindent}\textit{// Challenge}
+  \State $\textit{chl} \gets \textsf{HASH}\big(pk \,\|\, j(E_{\mathrm{com}}) \,\|\, msg\big)$
+
+  \Statex \hspace{\algorithmicindent}\textit{// Response}
+  \State $(c_1,c_2) \gets M_{\mathrm{sk}}\cdot(1,\textit{chl})$
+  \State $I'_{\mathrm{chl}} \gets \textsf{KernelDecomposedToIdeal}_{2^{f}}(c_1,c_2)$
+  \State $I_{\mathrm{chl}} \gets [I_\text{sk}]_*I'_{\mathrm{chl}}$ \hfill \textit{// $I_{\mathrm{chl}}$ is the ideal corresponding to $\varphi_{\mathrm{chl}}$}
+  \State $\alpha_{\mathrm{rsp}} \gets \textsf{RandomEquivalentQuaternion}(I_{\mathrm{com}}\cap (I_{\mathrm{sk}}\cdot I_{\mathrm{chl}}))$
+  \State $\alpha_{\mathrm{rsp}},\, n_{\mathrm{bt}} \gets \textsf{ComputeBacktrackingAndNormalize}(\alpha_{\mathrm{rsp}})$
+  \State $d_{\mathrm{rsp}} \gets \operatorname{nrd}(\alpha_{\mathrm{rsp}})/D_{\mathrm{mix}}^{2}\cdot 2^{\,f-n_{\mathrm{bt}}}$
+          \hfill \textit{// $d_{\mathrm{rsp}}$ is the degree of $\varphi_{\mathrm{rsp}}$}
+  \State $r_{\mathrm{rsp}} \gets \textsf{DyadicValuation}(d_{\mathrm{rsp}})$
+  \State $q_{\mathrm{rsp}} \gets d_{\mathrm{rsp}}/2^{\,r_{\mathrm{rsp}}}$
+  \State $I_{\mathrm{com,rsp}} \gets \mathcal{O}\alpha_{\mathrm{rsp}}+\mathcal{O}(q_{\mathrm{rsp}}D_{\mathrm{mix}})$
+         \hfill \textit{// $I_{\mathrm{com,rsp}}$ corresponds to $\varphi_{\mathrm{com}}\circ\varphi_{\mathrm{rsp}}$}
+  \State $e'_{\mathrm{rsp}} \gets e_{\mathrm{rsp}}-r_{\mathrm{rsp}}-n_{\mathrm{bt}}$
+         \hfill \textit{// $e'_{\mathrm{rsp}}$ is the degree of the two-dimensional isogeny}
+  \If{$e'_{\mathrm{rsp}} > 0$}
+     \State \textbf{try}
+     \State \quad $I_{\mathrm{aux}} \gets \textsf{RandomIdealGivenNorm}(2^{\,e'_{\mathrm{rsp}}}-q_{\mathrm{rsp}}, \textit{false})$
+     \State \quad $E'_{\mathrm{aux}}, P'_{\mathrm{aux}}, Q'_{\mathrm{aux}}
+                   \gets \textsf{IdealToIsogeny}(I_{\mathrm{com,rsp}} \cap I_{\mathrm{aux}})$
+     \State \textbf{except}
+     \State \quad \textbf{continue}
+    \State $\begin{aligned}[t]
+&(E_{\mathrm{aux}}, P_{\mathrm{aux}}, Q_{\mathrm{aux}}, E_{\mathrm{chl}}, P_{\mathrm{chl}}, Q_{\mathrm{chl}})
+\gets {} \textsf{SplitAuxiliaryIsogeny}\\
+&(E_{\mathrm{com}}, E'_{\mathrm{aux}}, P_{\mathrm{com}}, Q_{\mathrm{com}}, P'_{\mathrm{aux}}, Q'_{\mathrm{aux}}, q_{\mathrm{rsp}}, e'_{\mathrm{rsp}}, r_{\mathrm{rsp}}, n_{\mathrm{bt}})
+\end{aligned}$
+  \Else
+     \State \textbf{try}
+     \State \quad $E_{\mathrm{chl}}, P_{\mathrm{chl}}, Q_{\mathrm{chl}} \gets \textsf{IdealToIsogeny}(I_{\mathrm{com,rsp}})$
+     \State \quad $E_\text{aux}, P_\text{aux}, Q_\text{aux} \gets E_\text{chl}, P_\text{chl}, Q_\text{chl}$
+     \State \textbf{except}
+     \State \quad \textbf{continue}
+  \EndIf
+  \If{$r_{\mathrm{rsp}} > 0$}
+     \State $\begin{aligned}[t]
+     E_{\mathrm{chl}}, P_{\mathrm{chl}}, Q_{\mathrm{chl}}
+     \gets &\textsf{ComputeEvenNonBacktrackingResponse}\\
+     &(E_{\mathrm{chl}}, P_{\mathrm{chl}}, Q_{\mathrm{chl}},
+     \alpha_{\mathrm{rsp}}, e'_{\mathrm{rsp}}, r_{\mathrm{rsp}})
+     \end{aligned}$
+  \EndIf
+  \State $\begin{aligned}[t]
+  E_{\mathrm{chl}}, P_{\mathrm{chl}}, Q_{\mathrm{chl}}
+  \gets &\textsf{ComputeChallengeIsogeny}\\
+  &(E_{\mathrm{pk}}, \textit{chl},
+  P_{\mathrm{pk}}, Q_{\mathrm{pk}}, E_{\mathrm{chl}}, P_{\mathrm{chl}}, Q_{\mathrm{chl}}, n_{\mathrm{bt}})
+  \end{aligned}$
+  \State $\begin{aligned}[t]
+  M_{\mathrm{chl}},\, \mathit{hint}_{\mathrm{aux}},\, \mathit{hint}_{\mathrm{chl}}
+  \gets &\textsf{SetChangeOfBasisMatrix}\\
+  &(E_{\mathrm{aux}}, E_{\mathrm{chl}},
+  P_{\mathrm{aux}}, Q_{\mathrm{aux}}, P_{\mathrm{chl}}, Q_{\mathrm{chl}}, e'_{\mathrm{rsp}}+r_{\mathrm{rsp}})
+  \end{aligned}$
+  \State $\sigma \gets (E_{\mathrm{aux}}, n_{\mathrm{bt}}, r_{\mathrm{rsp}}, M_{\mathrm{chl}},
+                       \textit{chl}, \mathit{hint}_{\mathrm{aux}}, \mathit{hint}_{\mathrm{chl}})$
+  \State \Return $\sigma$
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
+
+\begin{theorem}[Improved Sign bound]
+\label{thm:sign-bound}
+During the execution of Algorithm~\ref{alg:Sign}, the maximum size of integers is less than $2^{21}p^7$.
+\end{theorem}
+
+\begin{proof}
+We follow the proof of~\cite[Theorem~2]{KLKL25} with improved bounds on some algorithms introduced in Section~\ref{sec:ideal} and Section~\ref{sec:sampling}.
+By Lemma~\ref{lem:RandomIdealGivenNorm-bound}, Lemma~\ref{lem:IdealToIsogeny-bound}, and the same process with the proof of~\cite[Theorem~2]{KLKL25}, it is trivial that the maximum size of integers does not appear in lines except for the following lines:
+\begin{itemize}
+    \item\textbf{Line 13}: Since $[\Isk]_*\Ichl' = \Isk^{-1}(\Isk\cap\Ichl')$ and $\Isk^{-1} = \frac{\bar{\Isk}}{\nrd(\Isk)}$~\cite[16.6.14]{Voi21},
+    by Lemma~\ref{lem:denombound}, Lemma~\ref{lem:idealmult-bound}, and Lemma~\ref{lem:RandomEquivalentPrimeIdeal-bound}, the maximum size of integers during the computation of the intersection is less than
+    \[
+        2^4\cdot2^4\cdot\frac{p^2}{16}\cdot\nrd(\Isk)^2\cdot\nrd(\Ichl')^2
+        \le 2^4p^2 \cdot (2^{33.5}\sqrt{p})^2\cdot 2^{2f}
+        \le 2^{41}p^5.
+    \]
+    Also, by Lemma~\ref{lem:denombound}, Lemma~\ref{lem:latticeinter-bound}, and Lemma~\ref{lem:RandomEquivalentPrimeIdeal-bound}, the maximum size of integers during the compuation of the multiplication is less than
+    \[\begin{aligned}
+        &\quad\frac{64p^2}{\pi^4}(2\nrd(\Isk))^2\cdot2^2\cdot\nrd(\Isk)\cdot\nrd(\Ichl')\\
+        &= \frac{64p^2}{\pi^4}(2\cdot2^{33.5}\sqrt{p} )^2 \cdot 2^2 \cdot 2^{33.5}\sqrt{p} \cdot 2^f\\
+        &\le 2^{f+100.5} \cdot \pi^{-4} \cdot p^{3.5}
+        \le 2^{100}\pi^{-4}p^{4.5}\enspace.
+    \end{aligned}\]
+
+    \item\textbf{Line 14}: During the computation of $\Icom \cap (\Isk \cdot \Ichl)$, since $\nrd(\Ichl)=\nrd(\Ichl')$, by applying Lemma~\ref{lem:denombound} and Lemma~\ref{lem:idealmult-bound}, the maximum size of integers during the computation of multiplication is less than
+    \[
+        \frac{64p^2}{\pi^4}2^2(2\nrd(\Isk))^2\nrd(\Isk)\nrd(\Ichl) \le 2^{10}\pi^{-4}p^2 \cdot (2^{33.5}\sqrt{p})^3 \cdot 2^f \le 2^{110}\pi^{-4}p^{3.5}.
+    \]
+    Also, by Lemma~\ref{lem:denombound}, Lemma~\ref{lem:latticeinter-bound}, and Lemma~\ref{lem:RandomEquivalentPrimeIdeal-bound}, the maximum size of integers during the computation of the intersection is less than
+    \[
+        2^4\cdot2^4\cdot\frac{p^2}{16}\cdot\nrd(\Icom)^2\nrd(\Isk \cdot \Ichl)^2
+        \le 2^4p^2 \cdot (2^{33.5}\sqrt{p})^2 \cdot (2^{33.5}\sqrt{p})^2 \cdot 2^{2f}
+        = 2^{138}p^6.
+    \]
+
+    \item\textbf{Line 24}: During the computation of $\Icomrsp \cap \Iaux$, by Lemma~\ref{lem:denombound} and Lemma~\ref{lem:latticeinter-bound}, the maximum size of integers is less than
+    \[\begin{aligned}
+        2^4\cdot2^4\cdot\frac{p^2}{16}\cdot\nrd(\Icomrsp)^2\cdot\nrd(\Iaux)^2
+        &\le 2^4p^2(\qrsp\Dmix)^2(2^{\ersp})^2\\
+        &\le 2^4p^2(2^8p^2)^2(2^{1/2}\sqrt{p})^2
+        \le 2^{21}p^7.
+    \end{aligned}\]
+\end{itemize}
+\end{proof}
+
+
+\subsection{Implementation and performance analysis}
+\label{subsec:performance}
+
+To evaluate the practical impact of the reduced precision bounds derived in
+Section~\ref{subsec:bound}, we compare two fixed-precision integer-arithmetic
+implementations of SQIsign: the implementation of previous work~\cite{KLKL25},\footnote{https://github.com/munsanwon2/SQIsign-Fixed-Precision}
+which uses the precision budgets of $7026/10713/14150$ bits for the
+NIST-I/III/V parameter sets,
+and our implementation,\footnote{Our implementation is based on the previous work~\cite{KLKL25}.} which uses the precision budgets of $1774/2696/3555$ bits implied by Theorem~\ref{thm:keygen-bound} and Theorem~\ref{thm:sign-bound}.
+Both implementations are built on top of the same SQIsign Round-2 codebase;
+they differ in the quaternion-side algorithms introduced in Section~\ref{sec:ideal} and Section~\ref{sec:sampling}, and in the resulting precision used for quaternion-side integer arithmetic.
+% The underlying $\Fpp$ arithmetic and isogeny routines are identical.
+% The source code of the previous implementation is publicly available at \url{<<TODO: previous paper repo URL>>},
+The source code of our implementation is publicly available at:
+\begin{center}
+\url{<<TODO: this work repo URL>>}.
+\end{center}
+
+\paragraph{Results.}
+Table~\ref{tab:perf} compares the median running time of $\textsf{KeyGen}$, $\textsf{Sign}$, and $\textsf{Verify}$ for both implementations at each NIST security level, measured over $\texttt{<<TODO: N>>}$ independent executions.
+% Detailed instructions for reproducing the measurements, including hardware and compiler configuration, are provided in the repository \texttt{README}.
+
+\begin{table}[h]
+\centering
+\caption{Median wall-clock running time of $\textsf{KeyGen}$,
+$\textsf{Sign}$, and $\textsf{Verify}$ for both implementations
+at each NIST security level.}
+% The first row uses the precision budget of~\cite{KLKL25}; the second row uses the precision budget derived in this work.}
+\label{tab:perf}
+\setlength{\tabcolsep}{2.5pt}
+% \renewcommand{\arraystretch}{1.15}
+\begin{tabular}{l ccc ccc ccc}
+\toprule
+& \multicolumn{3}{c}{NIST-I}
+& \multicolumn{3}{c}{NIST-III}
+& \multicolumn{3}{c}{NIST-V} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
+Implementation
+& KeyGen & Sign & Verify
+& KeyGen & Sign & Verify
+& KeyGen & Sign & Verify \\
+\midrule
+Previous work~\cite{KLKL25}
+& --- & --- & ---
+& --- & --- & ---
+& --- & --- & --- \\
+Ours
+& --- & --- & ---
+& --- & --- & ---
+& --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Discussion.}
+As shown in Table~\ref{tab:perf}, our implementation yields a measurable
+speedup for $\textsf{KeyGen}$ and $\textsf{Sign}$ at every security level,
+while $\textsf{Verify}$ is essentially unaffected since it does not invoke
+the quaternion-side routines.
+The improvement grows with the security level, by saving more bits on precision.
+This confirms that the compact quaternion algorithms of Section~\ref{sec:ideal} and Section~\ref{sec:sampling} reduce not only the memory footprint of fixed-precision SQIsign but also its practical running time.
