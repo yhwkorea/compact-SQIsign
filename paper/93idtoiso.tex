@@ -1,0 +1,104 @@
+\section{Bound on IdealToIsogeny}
+\label{sec:idealtoisogeny}
+
+We now revisit the integer-size bound for
+Algorithm~\ref{alg:IdealToIsogeny}.  The dominant arithmetic in this procedure
+comes from the ideal operations used to prepare suitable short representatives.
+In the previous analysis, this contribution was bounded using a coarse
+worst-case estimate for ideal multiplication.  This was sufficient for the
+correctness and asymptotic structure of the algorithm, since the remaining steps
+were already bounded by the same dominant term.  However, after refining the
+analysis of ideal multiplication, the same improvement can be propagated through
+the subroutines used by \textsf{IdealToIsogeny}.
+
+The first step is to update the bound for
+Algorithm~\ref{alg:SuitableIdeals}.  This algorithm computes a reduced basis of
+the input ideal and then searches for two short elements whose normalized norms
+satisfy a Bezout relation modulo a power of two.  The search phase itself does
+not introduce the largest integers: as in the previous analysis, the maximum
+size occurs during the ideal multiplication required to compute the reduced
+basis.  Therefore, replacing the old ideal multiplication estimate by
+Lemma~\ref{lem:idealmult-bound} immediately yields a tighter bound for
+\textsf{SuitableIdeals}.
+
+\begin{algorithm}
+\caption{SuitableIdeals$(I)$.}\label{alg:SuitableIdeals}
+  \begin{algorithmic}[1]
+    \Statex \textbf{Input:} A left $\mathcal{O}_0$-ideal $I$, a bound $d=\Theta(\sqrt{p})$.
+    \Statex \textbf{Output:} $\beta_1,\beta_2\in I$ and $u,v\in\mathbb{N}^*$ and $f\le e$ such that $\gcd(u q_I(\beta_1),v q_I(\beta_2))=1$ and $u q_I(\beta_1)+v q_I(\beta_2)=2^f$.
+    \State Compute a Minkowski reduced basis $(\alpha_1,\dots,\alpha_4)$ of $I$.
+    \State Let $B_j\leftarrow \left\lfloor \frac{1}{4}\sqrt{\frac{d}{q_I(\alpha_j)}}\right\rfloor$ for $j\in[1;4]$.
+    \State Sample $x_j\in [-B_j;B_j]^4$ for $j\in[1;4]$ and initialize $L\leftarrow [(x_1,\dots,x_4)]$.
+    \For{$(y_1,\dots,y_4)\in [-B_1;B_1]\times\cdots\times[-B_4;B_4]$}
+      \For{$(x_1,\dots,x_4)\in L$}
+        \State $\beta_1\leftarrow \sum_{j=1}^4 x_j\alpha_j$ and $\beta_2\leftarrow \sum_{j=1}^4 y_j\alpha_j$.
+        \State $d_1\leftarrow q_I(\beta_1),\ d_2\leftarrow q_I(\beta_2)$.
+        \If{$d_1\equiv 1\pmod{2}$ and $d_2\equiv 1\pmod{2}$ and $\gcd(d_1,d_2)=1$}
+          \State $u\leftarrow 2^{e} d_1^{-1}\bmod d_2$.
+          \State $v\leftarrow \frac{2^{e}-u d_1}{d_2}$.
+          \If{$v>0$}
+            \State $e'\leftarrow \min(\nu_2(u),\nu_2(v))$, $u\leftarrow u/2^{e'}$, $v\leftarrow v/2^{e'}$, and $f\leftarrow e-e'$.
+            \State \textbf{return} $\beta_1,\beta_2,u,v,f$.
+          \Else
+            \State Append $(y_1,\dots,y_4)$ to $L$.
+          \EndIf
+        \EndIf
+      \EndFor
+    \EndFor
+  \end{algorithmic}
+\end{algorithm}
+
+The following lemma records the resulting refined bound.  Compared with the
+previous accounting, the algorithm is unchanged; only the size analysis is
+updated.  The improvement comes from using the sharper bound for the intermediate
+ideal product appearing in the computation of the Minkowski reduced basis.
+
+\begin{lemma}
+During the execution of Algorithm~\ref{alg:SuitableIdeals}, the maximum size of integers is less than \[\frac{1024p^2}{\pi^4}\log{p} \cdot \nrd(I).\]
+\end{lemma}
+
+\begin{proof}
+To compute a Minkowski reduced basis, one forms an ideal $\bar{J_t}I$ and its Gram matrix, then computes LLL-reduced basis~\cite{AAA+25}, where $J_t$ is the SQIsign parameter ideal.
+By the proof of~\cite[Lemma~6]{KLKL25}, the maximum size of integers occurs by the ideal multiplication in Line~1.
+Then, by Lemma~\ref{lem:idealmult-bound}, Lemma~\ref{lem:denombound}, and the fact that $\nrd(\bar{J_t}) < (\log{p})^2$, (See~\cite[Appendix~E]{KLKL25}.) we have the maximum size less than
+\[
+    \frac{1024p^2}{\pi^4}\log{p} \cdot \nrd(I).
+\]
+\end{proof}
+We next propagate this refined estimate to
+Algorithm~\ref{alg:IdealToIsogeny}.
+
+\begin{algorithm}
+\caption{IdealToIsogeny($I$)}\label{alg:IdealToIsogeny}
+\begin{algorithmic}[1]
+\Statex \textbf{Input:} A left $\mathcal{O}_0$-ideal $I$.
+\Statex \textbf{Output:} The codomain $E_I$ of $\varphi_I$, $\varphi_I(P_0)$, and $\varphi_I(Q_0)$.
+\State $u,v,e,s,t,\beta_1,\beta_2 \gets {\textsf{SuitableIdeals}}(I)$
+\State $d_1 \gets \mathrm{nrd}(\beta_1)/\mathrm{nrd}(\overline{J_s}I)$
+\State $d_2 \gets \mathrm{nrd}(\beta_2)/\mathrm{nrd}(\overline{J_t}I)$ \hfill {// $ud_1 + vd_2 = 2^e$, with $\gcd(ud_1,vd_2)=1$}
+\State $E_u,\varphi_u(P_s), \varphi_u(Q_s) \gets {\textsf{FixedDegreeIsogeny}}(s,u)$ \hfill {// $\varphi_u: E_s \to E_u$ is an isogeny of degree $u$}
+\State $E_v,\varphi_v(P_t), \varphi_v(Q_t) \gets {\textsf{FixedDegreeIsogeny}}(t,v)$ \hfill {// $\varphi_v: E_t \to E_v$ is an isogeny of degree $v$}
+\State $[P,Q]^T \gets \left[\frac{1}{\mathrm{nrd}(I)\mathrm{nrd}(J_t)}\right] \mathbf{M}_{\beta_1} \mathbf{M}_{\beta_2} [\varphi_v(P_t), \varphi_v(Q_t)]^T$
+\State $K_P \gets [2^{f-e}]([d_1]\varphi_u(P_s), P)$
+\State $K_Q \gets [2^{f-e}]([d_1]\varphi_u(Q_s), Q)$
+\State $E \times E', [(P,P'),(Q,Q')] \gets {\textsf{Isogeny22Chain}}(K_P, K_Q, [(\varphi_u(P_s), 0_{E_v}), (\varphi_u(Q_s), 0_{E_v})])$
+\If{$e_{2f}(P,Q) = e_{2f}(P_s, Q_s)^{u^2 d_1}$} \hfill {// We identify the right curve $E_I$ by ensuring it is $d_1$-isogeneous to $E_0$}
+    \State $E_I \gets E$, $P_I \gets P$, and $Q_I \gets Q$
+\Else
+    \State $E_I \gets E'$, $P_I \gets P'$, and $Q_I \gets Q'$
+    \State $[P_I,Q_I]^T \gets \left[\frac{1}{ud_1}\right]\mathbf{M}_{\beta_1}[P_I,Q_I]^T$
+\EndIf
+\State \textbf{return} $E_I, (P_I, Q_I)$
+\end{algorithmic}
+\end{algorithm}
+
+The improved bound for ideal multiplication, once inserted into \textsf{SuitableIdeals}, also gives the refined bound for the full \textsf{IdealToIsogeny} procedure.
+
+\begin{lemma}
+\label{lem:IdealToIsogeny-bound}
+During the execution of Algorithm~\ref{alg:IdealToIsogeny}, the maximum size of integers is less than \[\frac{1024p^2}{\pi^4}\log{p} \cdot \nrd(I).\]
+\end{lemma}
+
+\begin{proof}
+By following the same process of the proof of~\cite[Lemma~7]{KLKL25}, we have the same bound with Algorithm~\ref{alg:SuitableIdeals}.
+\end{proof}

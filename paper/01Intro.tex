@@ -1,0 +1,338 @@
+\section{Introduction}
+\label{sec:introduction}
+
+The National Institute of Standards and Technology (NIST) initiated the Post-Quantum Cryptography (PQC) standardization process in response to the threat that quantum computers pose to widely used public-key systems.
+NIST standardizes ML-DSA~\cite{MLDSA}, Falcon~\cite{PFH+20}, and SLH-DSA~\cite{SLHDSA} to provide the foundation for most post-quantum signature deployments,
+but its ongoing additional-signatures process also makes clear that algorithmic diversity and compact artifacts remain important design goals.
+Compactness of public keys and signatures matters in practice because they are carried in certificates, network-protocol handshakes, software-signing metadata, and secure-boot manifests, so their size directly affects bandwidth, storage, and latency.
+% This is particularly relevant for post-quantum deployment: the current NIST post-quantum signature standards use ML-DSA public keys of 1312--2592 bytes and signatures of 2420--4627 bytes, while SLH-DSA signatures begin at 7856 bytes;
+% thus, for standardized PQ signatures, data including public keys and signatures would exceed the IPv6 minimum MTU of 1280 bytes and frequently span multiple packets once protocol framing is included.
+In particular, NIST has explicitly sought candidates beyond structured lattices, as well as schemes with short signatures and fast verification.
+In this setting, SQIsign~\cite{DKL+20} is especially compelling: as an isogeny-based Round-2 candidate~\cite{AAA+25},
+it offers far smaller public keys and signature than the signatures of current post-quantum standards and leading candidates, which are often measured in kilobytes.
+
+\begin{table}
+\centering
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.1}
+
+\begin{tabular}{|l|c|c|c|c|c|c|}
+\hline
+\multicolumn{1}{|c|}{\multirow[c]{2}{*}{Scheme}}
+& \multicolumn{3}{c|}{PK (bytes)}
+& \multicolumn{3}{c|}{Sig (bytes)} \\
+\cline{2-7}
+& I & III & V & I & III & V \\
+\hline
+\textbf{SQIsign}        & 65   & 97    & 129   & 148   & 224    & 292   \\
+ML-DSA (Dilithium)      & 1312 & 1952  & 2592  & 2420  & 3309   & 4627  \\
+Falcon                  & 897  & --    & 1793  & 666   & --     & 1280  \\
+SLH-DSA (SPHINCS+)      & 32   & 48    & 64    & 7856  & 16224  & 29792 \\
+\hline
+\end{tabular}
+\caption{Public key (PK) and signature (Sig) sizes in bytes at NIST security levels I/III/V. Falcon defines parameter sets at levels I and V only.}
+\label{tab:pq-sig-sizes}
+\end{table}
+
+Fixed-precision integer arithmetic~\cite{Yat09} is one of the key requirement for practical cryptographic implementations:
+when all operands have statically bounded sizes, arithmetic routines can be implemented by not a dynamic memory allocation but a predictable control flow.
+It is essential for constant-time implementation~\cite{ABB+16} and for deployment on resource-constrained devices such as Cortex-M.
+This requirement was particularly challenging for SQIsign, whose key generation and signing algorithms involve arithmetic on quaternion algebra over rational field; intermediate size growth of integers representing quaternion elements is difficult to bound tightly.
+Consequently, existing SQIsign implementations have traditionally relied on multi-precision integer arithmetic, such as GMP, which complicates constant-time hardening and low-end-device deployment.
+Recent work~\cite{KLKL25} has overcome this obstacle by proving explicit coefficient-growth bounds for SQIsign and using them to realize fixed-precision integer arithmetic, making a more portable and implementation-friendly SQIsign possible~\cite{BHJ+25}.
+
+However, existing fixed-precision approach requires static precision remains quite large~\cite{KLKL25,BHJ+25,Ler26}, when computing the Hermite normal form (HNF) on integer matrices that SQIsign uses on its quaternion side.
+% In particular, HNF is applied repeatedly in the operations of ideals, and ideal operations are realized by taking the HNF of generators of the result ideal.
+Consequently, the global precision budget is driven not by the typical operand sizes arising in most routines, but by rare HNF intermediates whose coefficients can grow much larger than the input generators;
+this overprovisioning is undesirable in practice.
+More concretely, the precision size covering the uniform worst-case bound of every quaternion algorithm for SQIsign, is as large as about 13.5~times of the public key and as about 6~times of the signature size, for each NIST security level.
+More generally, for the security parameter $\lambda$ and the base prime $p\approx2^{2\lambda}$, previous KeyGen bound is $2^{68}p^9$ and previous Sign bound is $2^{16}p^{28}$ so quaternion operations need much more memory than operations in the finite field $\Fpp$, whose intermediate value sizes are at most $p^4$.
+It forces the implementation to carry unnecessarily wide integers throughout arithmetic, slowing down basic arithmetic such as additions, multiplications, and reductions.
+It also increases the memory footprint and thereby making the design less suitable for low-end or memory-constrained devices.
+
+\subsection{Our contributions}
+\label{subsec:contribution}
+
+In this work, our contributions are as follows:
+\begin{itemize}
+    \item \textbf{Improved fixed-precision}: By modifying some quaternion algorithms and analyzing existing algorithms tightly, we derive the improved fixed-precision compared to the previous work~\cite{KLKL25}. Our improvement is shown in Table~\ref{tab:comparebound}.
+\begin{table}
+\centering
+\caption{Comparison of fixed-precision bit sizes.}
+\label{tab:comparebound}
+\setlength{\tabcolsep}{8pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{c@{\hspace{10pt}}|@{\hspace{10pt}}c@{\hspace{15pt}}c@{\hspace{10pt}}|@{\hspace{10pt}}c}
+\hline
+\textbf{Security Level} & \textbf{Previous Work~\cite{KLKL25}} & \textbf{Ours} & \textbf{Improvement} \\
+\hline
+NIST-I   & 7,026  & 1,774 & 74.75\% \\
+NIST-III & 10,713 & 2,696 & 74.83\% \\
+NIST-V   & 14,150 & 3,555 & 74.88\% \\
+General  & $\log_2\left(2^{16}p^{28}\right)$ & $\log_2\left(2^{21}p^7\right)$ & $\log_2\left(2^{-5}p^{21}\right)$ \\
+\hline
+\end{tabular}
+\end{table}
+
+Public key sizes are $520 / 776 / 1032$ bits and signature sizes are $1184 / 1792 / 2336$ bits for NIST-I/III/V security level, respectively.
+Comparing with public key sizes, previous work achieves around $13.51 / 13.81 / 13.71$ times while ours achieves around $3.41 / 3.47 / 3.44$ times, respectively.
+Comparing with signature sizes, previous work achieves $5.93 / 5.98 / 6.06$ times while ours achieves around $1.50 / 1.50 / 1.52$ times, respectively.
+
+\medskip
+
+% \begin{table}
+% \centering
+% \caption{Comparison of fixed-precision bit sizes.}
+% % \label{tab:comparebound}
+% \setlength{\tabcolsep}{6pt}
+% \renewcommand{\arraystretch}{1.15}
+% \begin{tabular}{c|c|c|c|c|c}
+% \hline
+% \textbf{Security Level}
+% & \multicolumn{2}{c|}{\textbf{Previous Work~\cite{KLKL25}}}
+% & \multicolumn{2}{c|}{\textbf{Ours}}
+% & \textbf{Improvement} \\
+% \cline{2-5}
+% & \textbf{Precision}
+% & \shortstack{$\frac{\mathbf{Precision}}{\mathbf{Public\ key}}$}
+% & \textbf{Precision}
+% & \shortstack{$\frac{\mathbf{Precision}}{\mathbf{Public\ key}}$}
+% & \\
+% \hline
+% NIST-I   & 7,026  & 13.51 & 1,774 & 3.41 & 74.75\% \\
+% NIST-III & 10,713 & 13.81 & 2,696 & 3.47 & 74.83\% \\
+% NIST-V   & 14,150 & 13.71 & 3,555 & 3.44 & 74.88\% \\
+% General
+% & $\log_2\left(2^{16}p^{28}\right)$
+% & --
+% & $\log_2\left(2^{21}p^7\right)$
+% & --
+% & $\log_2\left(2^{-5}p^{21}\right)$ \\
+% \hline
+% \end{tabular}
+% \end{table}
+
+    \item \textbf{Performance enhancement of the fixed-precision implementation}:
+\end{itemize}
+
+% More generally, for the security parameter $\lambda$ and the base prime $p\approx2^{2\lambda}$, previous KeyGen bound is $2^{68}p^9$ and previous Sign bound is $2^{16}p^{28}$ so quaternion operations need much more memory than operations in the finite field $\Fpp$.
+% Our improved KeyGen bound is $2^{16}p^4$ and improved Sign bound is $2^{21}p^7$, much more closer to the necessary memory for operations in the finite field $\Fpp$, $p^4$.
+
+% \subsection{Related work}
+% \label{subsec:related-work}
+
+% Now we briefly introduce the related work of this paper necessary to understand the background of this work.
+
+% \paragraph{SQIsign with Fixed-Precision Integer Arithmetic~\cite{KLKL25}}
+
+% Kim et al. gave the first fixed-precision integer-arithmetic implementation of SQIsign by deriving uniform worst-case bounds for the quaternion algorithms used in the Round-2 KeyGen and Sign
+% procedures.
+% They analyzed all intermate values of quaternion algorithms used in the Round-2 KeyGen and Sign procedures of SQIsign, with respect to input values of the algorithms.
+% They further improved the bound by modifying ideal multiplication:
+% instead of using the oversized determinant modulus employed in the original modular HNF computation, they proved a tighter modulus based on the reduced norms of the input ideals.
+
+% Nevertheless, the resulting fixed-precision approach remains costly for practical deployment.
+% Even after the improvement, the required precision is still approximately $7026$, $10713$, and $14150$ bits for NIST levels I, III, and V, respectively, corresponding to $110$, $168$, and $222$ 64-bit limbs.
+% The main bottleneck is the ideal-multiplication routine, especially the HNF computation over large integer moduli, which forces very large intermediate representations.
+% As a result, although fixed-precision SQIsign is an important step toward GMP-free and potentially constant-time implementations, its current precision requirements make it inefficient for real-world constrained platforms.
+
+% \paragraph{Modified LLL Algorithm~\cite{Poh87}}
+
+
+\subsection{Technical overview}
+\label{subsec:technical-overview}
+
+The goal of this work is to reduce the static precision required by fixed-precision integer arithmetic in SQIsign.
+Since the precision must cover every intermediate integer, it is determined by the largest size among the all values inside quaternion algorithms used during key generation and signing procedures.
+We therefore identify the routines that dominate this intermediate growth, modify them, and otherwise give tighter size analyses for the existing procedures as follows:
+\begin{itemize}
+    \item Replacing the subroutine HNF algorithm with modified LLL algorithm for ideal operations to reduce the maximum size of intermediate values
+    \item Modifying \textsf{RandomIdealGivenNorm} algorithm with smaller intermediate integer sizes while remaining the distribution of output ideals
+    \item Giving tighter bound on the reduced norm of output ideals of \textsf{RandomEquivalentPrimeIdeal} algorithm
+\end{itemize}
+The result is then propagated through the full SQIsign key generation and signing algorithms to obtain improved uniform worst-case bounds, which directly translate into a smaller fixed-precision memory requirement.
+
+\paragraph{Replacing HNF with MLLL.}
+The main bottleneck of precision growth in the previous fixed-precision analysis is the use of HNF algorithm as the subroutine of quaternion ideal multiplication, which we call \textsf{IdealMultiplication}.
+% In particular, ideal multiplication first generates a lattice for the product ideal and then computes an HNF basis of the corresponding integer matrix.
+% The HNF algorithm creates intermediate coefficients at most the square of determinant of the lattice, which can be much larger than the size of input values.
+To adress this bottleneck, we replace HNF with the variant algorithm~\cite{NS09} of modified LLL~(MLLL) algorithm~\cite{Poh87}, which takes a generating set of a lattice and returns an LLL-reduced basis of the same lattice.
+As a high-level visualization, this replacement is shown in Figure~\ref{fig:overview-mlll}.
+
+\begin{figure}
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  width=.98\linewidth,
+  colback=white,
+  colframe=black,
+  boxrule=0.8pt,
+  arc=1mm,
+  left=2mm,right=2mm,top=1.5mm,bottom=1.5mm
+]
+\textsf{IdealMultiplication}$(I_1,I_2)$
+\vspace{0.4em}
+\hrule
+\vspace{0.4em}
+\textbf{Input:} Two ideals $I_1 = \langle \alpha_1,\dots,\alpha_4 \rangle$, $I_2 = \langle \beta_1,\dots\beta_4 \rangle$.
+
+\smallskip
+
+\textbf{Output:} An ideal
+$I_1I_2=\langle \gamma_1,\gamma_2,\gamma_3,\gamma_4\rangle$.
+
+\vspace{0.4em}
+\hrule
+\vspace{0.4em}
+\begin{tabular}{@{}r@{\hspace{0.9em}}p{0.88\linewidth}@{}}
+1. &
+$r_1 \gets \mathrm{lcm}(r_{\alpha_1},r_{\alpha_2},r_{\alpha_3},r_{\alpha_4}),
+\quad 
+r_2 \gets \mathrm{lcm}(r_{\beta_1},r_{\beta_2},r_{\beta_3},r_{\beta_4})$
+\\[0.5em]
+2. &
+$\alpha_i \gets r_1\alpha_i,\quad \beta_j \gets r_2\beta_j
+\qquad \text{for } 1\le i,j\le 4$
+\\[0.5em]
+3. &
+$m \gets \mathrm{nrd}(r_1I_1)^2\,\mathrm{nrd}(r_2I_2)^2$
+\\[0.5em]
+4. &
+\redstrike{Compute $M \gets \mathbf{HNF}(\alpha_i\beta_j)_{1\le i,j\le 4}$ over $\mathbb{Z}_m$.}
+\\[-0.1em]
+&
+\textcolor{blue}{Compute an LLL-reduced basis $M \gets \mathbf{MLLL}\big((\alpha_i\beta_j)_{1\le i,j\le 4}\big)$.}
+\\[0.5em]
+5. &
+\textbf{return} $\dfrac{1}{r_1r_2}M$
+\end{tabular}
+\end{tcolorbox}
+\caption{Replacing HNF with MLLL in ideal multiplication.}
+\label{fig:overview-mlll}
+\end{figure}
+
+Since usage of HNF of ideal operations is to compute a basis of the result ideal, this replacement preserves correctness while keeping the intermediate growth.
+More concretely, after clearing denominators, the previous bound of \textsf{IdealMultiplication} of $I_1$ and $I_2$ from HNF is \[\nrd(I_1)^4\nrd(I_2)^4\] where $\nrd(I)$ is the reduced norm of $I$ which is in proportional to $\sqrt{\det(I)}$.
+This can be reduced to \[\frac{64p^2}{\pi^4}\nrd(I_1)\nrd(I_2)\] for a SQIsign parameter $p$, deriving asymptotically $1/4$ bound when $p$ is treated as a constant.
+
+
+\paragraph{Modifying \textsf{RandomIdealGivenNorm} for prime norm.}
+Replacing HNF with MLLL would suggest a reduction of the dominant ideal-arithmetic bound by roughly a factor of four.
+However, this improvement is not fully realized because of the algorithm \textsf{RandomIdealGivenNorm}:
+for prime $N$, it samples two quaternion elements $\gamma,\beta$ with large coefficients and computes the ideal generated by $N$ and $\gamma\beta$, which needs a large coefficient to be represented.
+
+The distribution of output ideal depends only on the residue class of a product $\gamma\beta$ modulo $N\calO_0$, where $\calO_0$ is the left order (see Section~\ref{subsec:quaternion}) of the output ideal.
+We therefore modify the routine to sample $\beta$ directly modulo $N$ subject to $\operatorname{nrd}(\beta)\not\equiv 0 \pmod N$, compute
+$g \equiv \gamma\beta \pmod N$, replacing the direct product $\gamma\beta$.
+As a high-level visualization, this modification is shown in Figure~\ref{fig:overview-sampling}.
+% Since the rejection condition is equivalent to the original one for prime $N$, and replacing $\gamma\beta$ by any congruent representative modulo $NO_0$ gives the same left ideal, 
+\begin{figure}
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  width=.98\linewidth,
+  colback=white,
+  colframe=black,
+  boxrule=0.8pt,
+  arc=1mm,
+  left=2mm,right=2mm,top=1.5mm,bottom=1.5mm
+]
+\textsf{RandomIdealGivenNorm}$(N)$
+
+\vspace{0.4em}
+\hrule
+\vspace{0.4em}
+
+\textbf{Input:} A prime $N$.
+
+\smallskip
+
+\textbf{Output:} An uniformly random left $\calO_0$-ideal $J'$.
+
+\vspace{0.4em}
+\hrule
+\vspace{0.4em}
+
+\begin{tabular}{@{}r@{\hspace{0.9em}}p{0.88\linewidth}@{}}
+1. &
+\textbf{while} $\gcd\!\left(\nrd(\gamma),N^2\right)=N$ \textbf{do}
+\\[0.2em]
+2. &
+\qquad Sample integers $g_1,g_2,g_3 \sample [0,N-1]$ uniformly
+\\[0.2em]
+3. &
+\qquad $\gamma \gets g_1 i + g_2 j + g_3 ij$
+\\[0.2em]
+4. &
+\qquad \textbf{if} $\bigl(-\nrd(\gamma):N\bigr)=1$ \textbf{then}
+\\[0.2em]
+5. &
+\qquad\qquad $\gamma \gets \gamma + \left(\sqrt{-\mathrm{nrd}(\gamma)} \bmod N\right)$
+\\[0.2em]
+6. &
+Sample integers $a,b,c,d \sample [0,N-1]$ such that
+$a^2+b^2+p(c^2+d^2)\not\equiv 0 \pmod N$ uniformly
+\\[0.5em]
+7. &
+$\beta \gets a+bi+cj+dk$
+\\[0.5em]
+8. &
+\textbf{return} $J' \gets$ the left $\mathcal{O}_0$-ideal generated by
+\replacebelow{\redstrike{$\gamma\beta$}}{$\gamma\beta \bmod N\mathcal{O}_0$}
+and $N$
+\end{tabular}
+\end{tcolorbox}
+\caption{Modification of \textsf{RandomIdealGivenNorm} algorithm.}
+\label{fig:overview-sampling}
+\end{figure}
+
+The modified algorithm preserves the original uniform output distribution while requiring a smaller fixed-precision bound.
+More concretely, with an input $N$, the original algorithm requires the integer size $O(N^4)$, while the modified one requires  $O(N^2)$.
+
+\paragraph{Tighter bound on \textsf{RandomEquivalentPrimeIdeal}.}
+The algorithm \textsf{RandomEquivalentPrimeIdeal} takes an input ideal $I=\langle \alpha_1,\dots,\alpha_4 \rangle$ then outputs an equivalent ideal $J$ with prime reduced norm.
+It computes $\beta=\sum_{i=1}^4 c_i\alpha_i$ with random coefficients $c_i$ then compute the ideal $J = \frac{\bar{\beta}}{\nrd(I)}I$ until its reduced norm is prime.
+
+The previous analysis used a coarse bound on the reduced norm of the ideal returned by the algorithm \textsf{RandomEquivalentPrimeIdeal};
+the output norm was treated as being bounded by $p$.
+This is overly pessimistic, since the observed output norms are typically of size $O(\sqrt{p})$~\cite{KLPT14}.
+To justify a tighter bound, we use transference theorem~(Lemma~\ref{lem:transference}), together with a heuristic lower bound on the shortest norm in the dual lattice of input ideals;
+we obtain
+\[
+    \frac{\operatorname{nrd}(\alpha_4)}{\operatorname{nrd}(I)}
+    = O(\sqrt{p}),
+\]
+where $(\alpha_1,\dots,\alpha_4)$ is an LLL-reduced basis of $I$.
+% Let
+% \[
+%   \beta=\sum_{i=1}^{4} c_i\alpha_i,\quad |c_i|\le \coeffbound.
+% \]
+% where $\alpha_1,\ldots,\alpha_4$ is the LLL-reduced basis of the ideal lattice $I$.
+Since the reduced norm is a positive definite quadratic form, the triangle inequality gives
+\[
+  \sqrt{\nrd(\beta)}
+  \leq \sum_{i=1}^{4} |c_i|\sqrt{\nrd(\alpha_i)}
+  \leq \coeffbound\sum_{i=1}^{4}\sqrt{\nrd(\alpha_i)},
+\]
+for some constant $\coeffbound$.
+Thus, for $J=\chi_I(\beta)$, one obtains the rough bound
+\[
+  \nrd(J)
+  = \frac{\nrd(\beta)}{\nrd(I)}
+  \leq
+  \frac{\coeffbound^2}{\nrd(I)}
+  \left(\sum_{i=1}^{4}\sqrt{\nrd(\alpha_i)}\right)^2
+  = O(\sqrt{p}).
+\]
+This implies that by our tight analysis on $\nrd(\alpha_4)$, the reduced norm of the prime ideal returned by \textsf{RandomEquivalentPrimeIdeal} is also tightly bounded by $O(\sqrt{p})$.
+This tighter estimate realizes the tighter bound on the key generation and signing procedures of SQIsign.
+% This tighter estimate removes another source of overestimation.
+
+% \paragraph{Deriving the uniform bound on key generation and signing algorithms.}
+% Finally, we propagate the above improvements through the SQIsign key generation and signing procedures.
+% For key generation, the compact prime-norm sampling routine, the tighter bound for \textsf{RandomEquivalentPrimeIdeal}, and the refined analysis of \textsf{IdealToIsogeny} give a uniform worst-case integer bound of less than $16p^4$.
+% For signing, the same improvements apply to commitment sampling, challenge-ideal computation, response sampling, and the auxiliary ideal-intersection step; the resulting uniform worst-case bound is less
+% than $2^{21}p^7$.
+% Instantiating these bounds for NIST security levels I, III, and V yields fixed-precision sizes as shown in Table~\ref{tab:comparebound}.
+% % of $1774$, $2696$, and $3555$ bits, respectively.
+% % Compared with the previous bounds of $7026$, $10713$, and $14150$ bits, this corresponds to reductions of $74.75\%$, $74.83\%$, and $74.88\%$.
