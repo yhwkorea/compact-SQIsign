@@ -7,6 +7,7 @@ This library is a C implementation of SQIsign.
 - CMake (version 3.13 or later)
 - C11-compatible compiler
 - GMP is NOT required anymore!
+- Low memory is allowed now!
 
 ### Pre-computation
 
@@ -65,7 +66,7 @@ If set to `MINI`, the mini-gmp library is used, whose sources are included in th
 
 If set to `ON` (default), SQIsign is built with signature and verification functionality.
 If set to `OFF`, SQIsign is built with verification functionality only.
-In the latter case, GMP is no longer a dependency.
+In the latter case, SQIsign is built with smaller memory.
 
 ### CMAKE_BUILD_TYPE
 
