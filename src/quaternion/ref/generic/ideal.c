@@ -158,8 +158,22 @@ quat_lideal_generator(quat_alg_elem_t *gen, const quat_left_ideal_t *lideal, con
     int a, b, c, d;
     int found = 0;
     int int_norm = 0;
+    int gen_search_total = 0;
+    fprintf(stderr, "[LIDEAL-GEN] enter lideal.basis_max=%d lideal.denom=%d lideal.norm=%d\n",
+        ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal->lattice.basis[_i][_j]); if(b>m)m=b;} m; }),
+        ibz_bitsize(&lideal->lattice.denom), ibz_bitsize(&lideal->norm));
+    fflush(stderr);
     while (1) {
         int_norm++;
+        if (int_norm == 5 || int_norm == 20 || int_norm == 50 || int_norm == 100 || int_norm % 200 == 0) {
+            fprintf(stderr, "[LIDEAL-GEN] int_norm=%d total_searches=%d (still no generator)\n", int_norm, gen_search_total);
+            fflush(stderr);
+        }
+        if (int_norm > 500) {
+            fprintf(stderr, "[LIDEAL-GEN] ABORT int_norm > 500, can't find generator\n");
+            fflush(stderr);
+            break;
+        }
         for (a = -int_norm; a <= int_norm; a++) {
             for (b = -int_norm + abs(a); b <= int_norm - abs(a); b++) {
                 for (c = -int_norm + abs(a) + abs(b); c <= int_norm - abs(a) - abs(b); c++) {
@@ -167,6 +181,7 @@ quat_lideal_generator(quat_alg_elem_t *gen, const quat_left_ideal_t *lideal, con
                     ibz_vec_4_set(&vec, a, b, c, d);
                     ibz_vec_4_content(&gcd, &vec);
                     if (ibz_is_one(&gcd)) {
+                        gen_search_total++;
                         ibz_mat_4x4_eval(&(gen->coord), &(lideal->lattice.basis), &vec);
                         ibz_copy(&(gen->denom), &(lideal->lattice.denom));
                         quat_alg_norm(&norm_int, &norm_denom, gen, alg);
@@ -203,12 +218,27 @@ quat_lideal_mul(quat_left_ideal_t *product,
     ibz_t norm, norm_d;
     ibz_init(&norm);
     ibz_init(&norm_d);
+    fprintf(stderr, "[LIDEAL-MUL] enter alpha.coord_max=%d alpha.denom=%d lideal.norm=%d lideal.denom=%d\n",
+        ({ int m=0; for (int _i=0;_i<4;_i++){int b=ibz_bitsize(&alpha->coord[_i]); if(b>m)m=b;} m; }),
+        ibz_bitsize(&alpha->denom), ibz_bitsize(&lideal->norm), ibz_bitsize(&lideal->lattice.denom));
+    fflush(stderr);
     quat_lattice_alg_elem_mul(&(product->lattice), &(lideal->lattice), alpha, alg);
+    fprintf(stderr, "[LIDEAL-MUL] post_alg_elem_mul prod.basis_max=%d prod.denom=%d\n",
+        ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&product->lattice.basis[_i][_j]); if(b>m)m=b;} m; }),
+        ibz_bitsize(&product->lattice.denom));
+    fflush(stderr);
     product->parent_order = lideal->parent_order;
     quat_alg_norm(&norm, &norm_d, alpha, alg);
+    fprintf(stderr, "[LIDEAL-MUL] post_norm norm=%d norm_d=%d\n", ibz_bitsize(&norm), ibz_bitsize(&norm_d));
+    fflush(stderr);
     ibz_mul(&(product->norm), &(lideal->norm), &norm);
+    fprintf(stderr, "[LIDEAL-MUL] post_mul_norm prod.norm=%d (=lideal.norm*norm), checking div by norm_d...\n",
+        ibz_bitsize(&(product->norm)));
+    fflush(stderr);
     assert(ibz_divides(&(product->norm), &norm_d));
     ibz_div(&(product->norm), &norm, &(product->norm), &norm_d);
+    fprintf(stderr, "[LIDEAL-MUL] exit prod.norm=%d\n", ibz_bitsize(&(product->norm)));
+    fflush(stderr);
     assert(quat_lideal_norm_verify(lideal));
     ibz_finalize(&norm_d);
     ibz_finalize(&norm);

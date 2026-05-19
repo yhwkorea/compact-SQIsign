@@ -337,16 +337,39 @@ ibz_mat_4x4_inv_with_det_as_denom(ibz_mat_4x4_t *inv, ibz_t *det, const ibz_mat_
     ibz_mat_2x2_det_from_ibz(&(s[5]), &((*mat)[0][2]), &((*mat)[0][3]), &((*mat)[1][2]), &((*mat)[1][3]));
     ibz_mat_2x2_det_from_ibz(&(c[5]), &((*mat)[2][2]), &((*mat)[2][3]), &((*mat)[3][2]), &((*mat)[3][3]));
 
+    /* Issue R8 trace: track input mat entries + 2x2 minors + their products. */
+    {
+        int mat_max = 0;
+        for (int _i = 0; _i < 4; _i++) for (int _j = 0; _j < 4; _j++) {
+            int b = ibz_bitsize(&((*mat)[_i][_j]));
+            if (b > mat_max) mat_max = b;
+        }
+        int minor_max = 0;
+        for (int _i = 0; _i < 6; _i++) {
+            int b1 = ibz_bitsize(&s[_i]);
+            int b2 = ibz_bitsize(&c[_i]);
+            if (b1 > minor_max) minor_max = b1;
+            if (b2 > minor_max) minor_max = b2;
+        }
+        fprintf(stderr, "[INV4x4] mat_max=%d minor_max=%d\n", mat_max, minor_max);
+        fflush(stderr);
+    }
+
     // compute det
     ibz_set(&work_det, 0);
+    int _prod_peak = 0;
     for (int i = 0; i < 6; i++) {
         ibz_mul(&prod, &(s[i]), &(c[5 - i]));
+        int pb = ibz_bitsize(&prod);
+        if (pb > _prod_peak) _prod_peak = pb;
         if ((i != 1) && (i != 4)) {
             ibz_add(&work_det, &work_det, &prod);
         } else {
             ibz_sub(&work_det, &work_det, &prod);
         }
     }
+    fprintf(stderr, "[INV4x4] det_prod_peak=%d work_det=%d\n", _prod_peak, ibz_bitsize(&work_det));
+    fflush(stderr);
     // compute transposed adjugate
     for (int j = 0; j < 4; j++) {
         for (int k = 0; k < 2; k++) {
@@ -387,6 +410,15 @@ ibz_mat_4x4_inv_with_det_as_denom(ibz_mat_4x4_t *inv, ibz_t *det, const ibz_mat_
                                             &(s[3 - j - (j == 1) - (j == 2)]));
             }
         }
+    }
+    {
+        int adj_max = 0;
+        for (int _i = 0; _i < 4; _i++) for (int _j = 0; _j < 4; _j++) {
+            int b = ibz_bitsize(&work[_i][_j]);
+            if (b > adj_max) adj_max = b;
+        }
+        fprintf(stderr, "[INV4x4] adj_max=%d (mat * minor product)\n", adj_max);
+        fflush(stderr);
     }
     if (inv != NULL) {
         // put transposed adjugate in result, or 0 if no inverse

@@ -139,8 +139,11 @@ quat_lideal_prime_norm_reduced_equivalent(quat_left_ideal_t *lideal,
 
             quat_alg_conj(&new_alpha, &new_alpha);
             ibz_mul(&new_alpha.denom, &new_alpha.denom, &lideal->norm);
+            fprintf(stderr, "[PNRE] calling lideal_mul ctr=%d\n", ctr); fflush(stderr);
             quat_lideal_mul(lideal, lideal, &new_alpha, alg);
+            fprintf(stderr, "[PNRE] lideal_mul returned; checking primality...\n"); fflush(stderr);
             assert(ibz_probab_prime(&lideal->norm, primality_num_iter));
+            fprintf(stderr, "[PNRE] primality check passed; found=1\n"); fflush(stderr);
 
             found = 1;
             break;
