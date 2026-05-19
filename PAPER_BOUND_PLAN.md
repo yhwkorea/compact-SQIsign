@@ -1,5 +1,19 @@
 # Paper Bound 도달 계획표 (2026-05-19 04:05 KST)
 
+## ✅ 목표 달성 (2026-05-19 PM, commit `5ff147b`)
+
+P1~P5 전부 closed. lvl1 28-limb sign+verify EXIT=0 (seed=1, 33s). 측정 peak **1520 bit** < paper Sign bound 1757 bit < 28-limb cap 1792 bit (272 bit 마진). 자세한 history는 [`HANDOFF.md`](HANDOFF.md), 최종 측정 테이블은 [`SIGN_FUNCTION_PLAN.md`](SIGN_FUNCTION_PLAN.md).
+
+핵심 발견: paper Issue 8 본정공 (HNF→MLLL/ML2)이 `quat_lattice_alg_elem_mul`에 미적용이던 게 모든 saturate 지점의 공통 source. 거기 HNF→ML2(d=4) 교체하니 P3/P4/P5 부수 효과로 같이 해결.
+
+추가로 적용된 fixes (commit `5ff147b`):
+- **Issue 9 generalized**: `quat_lideal_create_with_norm` 변형 + 5 caller 라우팅
+- **Issue 14**: `quat_alg_norm_mod` / `quat_alg_mul_mod` + N²-divides Q+R/N split (sampling이 paper Lemma 4N² 준수)
+
+아래 본문은 진행 history (참고용 보존).
+
+---
+
 목표: paper Theorem 2 sign bound (Line 13: $2^{41}p^5\approx1281$bit, Line 14: $2^{138}p^6\approx1626$bit, Line 24: $2^{21}p^7\approx1757$bit, 총합 1774 bit / 28 limbs) **안에 측정값이 들어올 때까지**.
 
 ## 현 진척 (paper Issue 1~13 정공 진행)

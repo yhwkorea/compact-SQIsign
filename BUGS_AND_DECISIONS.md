@@ -3,6 +3,49 @@
 이 문서는 paper Issue 1~13 정공 적용 + sign+verify EXIT=0 도달 과정에서 발견한 결정적 버그와 설계 판단을 기록한다.
 commit `71fca30` 본문 외 별도로 보존할 가치가 있는 항목만.
 
+## 2026-05-19 PM 후속 update (commit `5ff147b`)
+
+71fca30 작성 시점의 "미해결" 5개 항목 (debug fprintf 정리는 보류, 그 외 4개) 모두 같은 날 PM 세션에서 closed. lvl1 28-limb sign+verify PASS (seed=1, 33s).
+
+추가된 결정적 버그/결정:
+
+### 결정적 버그 6: `quat_lattice_alg_elem_mul` 끝의 HNF (paper Issue 8 ext)
+**위치**: `src/quaternion/ref/generic/lattice.c quat_lattice_alg_elem_mul` 끝의 `quat_lattice_hnf(prod)` 호출.
+
+**증상**: 110-limb에선 invisible. **28-limb에선 silent overflow** — ML2 #0이 `rho=8` (rank 8 in 4D, 불가능) 반환하면서 downstream `quat_lideal_norm`이 0 반환 → LLL infinite loop. 측정: 이 HNF 안 `quat_lattice_alg_elem_mul` 출력 basis 1269 bit → ML2 input → gram 2539 bit (paper bound 1757 bit 위반).
+
+**원인**: HNF가 entries 압축이 아니라 cofactor expansion으로 entries를 $\sim4\cdot\log_2(K)$ bit까지 키움 (4x4 det 통한 unique form 구성).
+
+**Fix**: HNF → `quat_ml2(d=4)` on 4 column generators + `quat_lattice_reduce_denom`. ML2 같은 lattice의 LLL-reduced basis 반환 (cofactor expansion 없음). ML2 peak across whole sign: **2539 → 1520 bit**.
+
+**교훈**: paper Issue 8 "HNF → MLLL/ML2 교체"가 **모든 HNF 호출처에 적용**되어야 하는데, `alg_elem_mul`이 통합 시 누락됨. 메모리에 [[feedback_compact_sqisign_no_hnf]] 저장.
+
+### 결정적 결정 7: `quat_lideal_create_with_norm` (paper Issue 9 일반화)
+**위치**: `src/quaternion/ref/generic/ideal.c`.
+
+**Rationale**: paper §RandomIdealGivenPrimeNorm은 결과 이상의 nrd를 알려져 있는 N으로 둠. 우리 `quat_lideal_create`가 `quat_alg_norm(x)`로 재계산 → 입력 coord에 따라 ~2·coord+p bit transient (id2iso 경로에서 1979 bit 측정).
+
+**변형**: 새 함수가 lattice 구성은 동일하게 하되 `quat_alg_norm(x)` 단계 skip, `lideal->norm = N` 직접 할당. NDEBUG에선 `sqrt(quat_lattice_index)==N` verify로 잘못된 caller 감지.
+
+**적용**: 5 production caller (`normeq.c` sampling, `id2iso.c` kernel-dlog, `sign.c` 2개, `dim2id2iso.c`, `encode_signature.c` sk decode). 모두 paper algorithm structure로 nrd가 known.
+
+### 결정적 결정 8: sampling modular arithmetic (paper Issue 14 확정)
+**위치**: `src/quaternion/ref/generic/algebra.c` + `normeq.c`.
+
+**Paper 04Sampling §RandomIdealGivenPrimeNorm 본문**:
+> "the final multiplication may be carried out modulo $N$, so the coefficients handled by the algorithm remain reduced modulo $N$"
+
+paper Lemma `lem:RandomIdealGivenNorm-bound`: max bit < $4N^2$. 우리 코드는 full `quat_alg_mul` 후 `ibz_mod` → 내부 ibz_mul transient $p\cdot N^2 \approx 1273$ bit (paper bound 1014 bit 위반).
+
+**추가 함수**:
+- `quat_alg_norm_mod(res, x, N, alg)`: 각 $x_i^2$ 직후 mod N
+- `quat_alg_mul_mod(res, a, b, N, alg)`: 각 coord product 직후 mod N, local `sum[4]`로 alias-safe
+- `quat_alg_nrd_N2_divides(x, N, alg)`: paper while-cond `gcd(nrd, N²) = N` 체크. $nrd = N \cdot Q + R$ 분해로 N²-divides를 `(Q + R/N) \bmod N = 0`으로 환원. 최대 transient $2\log_2(N) \approx 1024$ bit (paper bound 안).
+
+**적용**: normeq.c 라인 290 / 326 / 332 / 301.
+
+---
+
 ---
 
 ## 결정적 버그 1: LatticeDual의 GCD normalization 누락
