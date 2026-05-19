@@ -1,4 +1,29 @@
-# compact-SQIsign HANDOFF (2026-05-18 03:55 갱신)
+# compact-SQIsign HANDOFF (2026-05-19 09:38 갱신)
+
+## 2026-05-19 세션 결과: paper bound 통과 + sign+verify EXIT=0
+
+상세 버그/결정 기록: `BUGS_AND_DECISIONS.md`.
+
+핵심 fix 5개 (commit `71fca30`):
+1. **`lattice.c quat_lattice_dual_without_hnf`**: paper LatticeDual Lines 7-8 GCD normalization 추가 (`quat_lattice_reduce_denom(dual, dual)` 한 줄). dual.basis **3598 → 62 bit**. 이게 결정적 fix.
+2. **`mlll.c quat_lattice_add_mlll`**: `quat_mlll` (Cohen integer GSO) → `quat_ml2` (paper의 MLLL = NS09 ML2)로 교체.
+3. **`ideal.c quat_lideal_inter`**: sign.c:81 chain도 `quat_lattice_intersect_mlll`로 wire (paper Issue 8 누락 완성).
+4. **`normeq.c quat_sampling_random_ideal_O0_given_norm`**: paper Issue 5 mod N 본격 적용 (β 샘플 + γβ mod N).
+5. **`ml2.c`**: oscillation detection 제거 + iter cap 65536 (paper Issue 13 답변 검증).
+
+측정 (Lvl1 110 limbs, sign 2 round EXIT=0):
+- `intersect_mlll` output: **255-320 bit** vs paper Line 14 bound 1626 bit ✓
+- `sample_response` radius: 520 bit vs paper Line 24 bound 1757 bit ✓
+- 이전 세션의 "paper-strict MLLL lvl1 unusable" 결론 **뒤집힘**.
+
+다음 진입점 (`BUGS_AND_DECISIONS.md` "미해결" section 참조):
+- debug fprintf trace 정리 (NDEBUG guard 또는 제거)
+- IBZ_LIMBS_lvl1=28 (paper claim) 시도
+- paper Issue 9, 11, 12 미적용 검토
+
+---
+
+## 2026-05-18 03:55 (이전 세션)
 
 ## 1. 즉시 시작
 ```bash
