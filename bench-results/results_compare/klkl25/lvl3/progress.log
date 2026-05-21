@@ -42,3 +42,11 @@
 [2026-05-22 01:34:44]   lvl3 / sign iter=10 core=2 dur=1300s exit=124 — not counted
 [2026-05-22 01:41:59]   lvl3 / sign iter=12 core=3 dur=555s exit=0 retries=2 wall=405.995862s  (valid=6/20)
 [2026-05-22 01:42:55]   lvl3 / sign iter=15 core=2 dur=491s exit=0 retries=0 wall=304.671569s  (valid=7/20)
+[2026-05-22 01:47:46]   lvl3 / sign iter=13 core=0 dur=810s exit=0 retries=4 wall=628.155696s  (valid=8/20)
+[2026-05-22 01:50:31]   lvl3 / sign iter=17 core=2 dur=456s exit=0 retries=3 wall=398.835710s  (valid=9/20)
+[2026-05-22 01:55:56]   lvl3 / sign iter=14 core=1 dur=1300s exit=124 — not counted
+[2026-05-22 01:59:02]   lvl3 / sign iter=18 core=0 dur=676s exit=0 retries=3 wall=482.262853s  (valid=10/20)
+[2026-05-22 02:03:06]   lvl3 / sign iter=20 core=1 dur=430s exit=0 retries=3 wall=355.983482s  (valid=11/20)
+[2026-05-22 02:03:39]   lvl3 / sign iter=16 core=3 dur=1300s exit=124 — not counted
+[2026-05-22 02:09:08]   lvl3 / sign iter=22 core=1 dur=362s exit=0 retries=0 wall=308.527698s  (valid=12/20)
+[2026-05-22 02:12:11]   lvl3 / sign iter=19 core=2 dur=1300s exit=124 — not counted
