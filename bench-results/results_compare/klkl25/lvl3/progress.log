@@ -66,3 +66,13 @@
 [2026-05-22 03:07:01]   lvl3 / sign iter=35 core=1 dur=873s exit=0 retries=5 wall=726.840515s  (valid=18/20)
 [2026-05-22 03:10:18]   lvl3 / sign iter=36 core=3 dur=806s exit=0 retries=5 wall=778.157357s  (valid=19/20)
 [2026-05-22 03:13:35]   lvl3 / sign iter=39 core=1 dur=394s exit=0 retries=1 wall=370.077750s  (valid=20/20)
+[2026-05-22 03:18:29]   lvl3 / sign iter=40 core=3 dur=491s exit=0 retries=4 wall=355.312850s  (valid=21/20)
+[2026-05-22 03:18:49]   lvl3 / sign iter=37 core=2 dur=1300s exit=124 — not counted
+[2026-05-22 03:25:43]   lvl3 / sign iter=38 core=0 dur=1301s exit=124 — not counted
+[2026-05-22 03:25:43] === lvl3 / sign done: 21 valid / 40 attempts (parallel N=4)
+[2026-05-22 03:25:43] === lvl3 / verify start (parallel N=4): target=20, hard_cap=300, per-iter timeout=1300s
+[2026-05-22 03:31:12]   lvl3 / verify iter=4 core=3 dur=329s exit=0 retries=0 wall=0.004712s  (valid=1/20)
+[2026-05-22 03:31:49]   lvl3 / verify iter=3 core=2 dur=366s exit=0 retries=0 wall=0.005509s  (valid=2/20)
+[2026-05-22 03:38:27]   lvl3 / verify iter=1 core=1 dur=764s exit=0 retries=6 wall=0.008776s  (valid=3/20)
+[2026-05-22 03:39:51]   lvl3 / verify iter=6 core=2 dur=482s exit=0 retries=1 wall=0.004722s  (valid=4/20)
+[2026-05-22 03:43:33]   lvl3 / verify iter=5 core=3 dur=741s exit=0 retries=4 wall=0.008959s  (valid=5/20)
