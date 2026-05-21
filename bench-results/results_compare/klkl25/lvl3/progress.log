@@ -4,3 +4,11 @@
 [2026-05-22 00:38:52]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
 [2026-05-22 00:38:52]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s
 [2026-05-22 00:38:52] === lvl3 / keypair start (parallel N=4): target=20, hard_cap=300, per-iter timeout=1300s
+[2026-05-22 00:39:52]   lvl3 / keypair iter=2 core=1 dur=60s exit=0 retries=? wall=59.539048s  (valid=1/20)
+[2026-05-22 00:40:09]   lvl3 / keypair iter=1 core=0 dur=77s exit=0 retries=? wall=76.999341s  (valid=2/20)
+[2026-05-22 00:41:32]   lvl3 / keypair iter=4 core=2 dur=160s exit=0 retries=? wall=160.033872s  (valid=3/20)
+[2026-05-22 00:41:46]   lvl3 / keypair iter=5 core=1 dur=114s exit=0 retries=? wall=114.313031s  (valid=4/20)
+[2026-05-22 00:42:10]   lvl3 / keypair iter=8 core=1 dur=24s exit=0 retries=? wall=23.296097s  (valid=5/20)
+[2026-05-22 00:42:42]   lvl3 / keypair iter=7 core=2 dur=70s exit=0 retries=? wall=69.289166s  (valid=6/20)
+[2026-05-22 00:42:48]   lvl3 / keypair iter=3 core=3 dur=236s exit=0 retries=? wall=235.846167s  (valid=7/20)
+[2026-05-22 00:43:16]   lvl3 / keypair iter=11 core=3 dur=28s exit=0 retries=? wall=27.274092s  (valid=8/20)
