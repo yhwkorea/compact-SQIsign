@@ -86,3 +86,9 @@
 [2026-05-22 04:07:12]   lvl3 / verify iter=14 core=2 dur=341s exit=0 retries=1 wall=0.008949s  (valid=11/20)
 [2026-05-22 04:09:35]   lvl3 / verify iter=13 core=3 dur=590s exit=0 retries=2 wall=0.009098s  (valid=12/20)
 [2026-05-22 04:11:59]   lvl3 / verify iter=16 core=0 dur=301s exit=0 retries=0 wall=0.004736s  (valid=13/20)
+[2026-05-22 04:24:05]   lvl3 / verify iter=18 core=3 dur=870s exit=0 retries=5 wall=0.009025s  (valid=14/20)
+[2026-05-22 04:25:13]   lvl3 / verify iter=15 core=1 dur=1300s exit=124 — not counted
+[2026-05-22 04:27:38]   lvl3 / verify iter=20 core=3 dur=213s exit=0 retries=0 wall=0.008920s  (valid=15/20)
+[2026-05-22 04:28:52]   lvl3 / verify iter=17 core=2 dur=1300s exit=124 — not counted
+[2026-05-22 04:33:39]   lvl3 / verify iter=19 core=0 dur=1300s exit=124 — not counted
+[2026-05-22 04:40:33]   lvl3 / verify iter=24 core=0 dur=414s exit=0 retries=0 wall=0.004672s  (valid=16/20)
