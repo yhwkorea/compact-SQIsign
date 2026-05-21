@@ -29,3 +29,4 @@
 [2026-05-21 16:30:57]   lvl1 / keypair iter=20 dur=35s exit=0 retries=? wall=35.665433s  (valid=20/20)
 [2026-05-21 16:30:57] === lvl1 / keypair done: 20 valid / 20 attempts
 [2026-05-21 16:30:57] === lvl1 / sign start: target=20, hard_cap=80, per-iter timeout=600s, pin=core 0
+[2026-05-21 16:31:56]   lvl1 / sign iter=1 dur=59s exit=0 retries=0 wall=31.626469s  (valid=1/20)
