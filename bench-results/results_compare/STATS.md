@@ -13,10 +13,11 @@ exit=0 (valid) attempts; `mean`/`median`/`min`/`max` are over those.
 | ours | lvl3 | verify | 23 | 0.005668 | 0.004749 | 0.004416 | 0.009230 |
 | ours | lvl5 | keypair | 23 | 227.923443 | 171.830075 | 16.277802 | 685.231778 |
 | ours | lvl5 | sign | 23 | 478.813548 | 412.870057 | 92.941101 | 1152.633749 |
-| ours | lvl5 | verify | 13 | 0.011605 | 0.009072 | 0.009000 | 0.017426 |
+| ours | lvl5 | verify | 23 | 0.011545 | 0.009091 | 0.008592 | 0.017426 |
 | klkl25 | lvl1 | keypair | 23 | 21.448500 | 19.681950 | 5.423453 | 46.544469 |
 | klkl25 | lvl1 | sign | 20 | 102.891061 | 66.975505 | 16.539400 | 333.446834 |
 | klkl25 | lvl1 | verify | 22 | 0.001819 | 0.001496 | 0.001441 | 0.003166 |
+| klkl25 | lvl3 | keypair | 0 | - | - | - | - |
 
 ## Side-by-side (per level, KeyGen / Sign / Verify; wall-clock seconds)
 
@@ -33,10 +34,12 @@ exit=0 (valid) attempts; `mean`/`median`/`min`/`max` are over those.
 
 | Implementation | KeyGen mean | KeyGen median | Sign mean | Sign median | Verify mean | Verify median |
 | -------------- | ----------: | ------------: | --------: | ----------: | ----------: | ------------: |
+| KLKL25 | — (n=0) | — | — (n=0) | — | — (n=0) | — |
 | Ours | 93.600723 (n=23) | 75.134131 | 178.307586 (n=23) | 165.185868 | 0.005668 (n=23) | 0.004749 |
+| **Ours speedup (median)** | — | | — | | — | |
 
 ### lvl5
 
 | Implementation | KeyGen mean | KeyGen median | Sign mean | Sign median | Verify mean | Verify median |
 | -------------- | ----------: | ------------: | --------: | ----------: | ----------: | ------------: |
-| Ours | 227.923443 (n=23) | 171.830075 | 478.813548 (n=23) | 412.870057 | 0.011605 (n=13) | 0.009072 |
+| Ours | 227.923443 (n=23) | 171.830075 | 478.813548 (n=23) | 412.870057 | 0.011545 (n=23) | 0.009091 |
