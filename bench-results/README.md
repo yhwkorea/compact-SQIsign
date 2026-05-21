@@ -9,7 +9,7 @@ at NIST levels I/III/V.
 | | |
 | --- | --- |
 | CPU | **Intel Core i7-8700K @ 3.70 GHz** (Coffee Lake, 6 cores / 12 threads) |
-| Pinning | `taskset -c 0` — single P-core, all runs share core 0 to avoid cross-core variance |
+| Pinning | `taskset -c <0..N-1>` — **N=4 parallel workers** pinned to cores 0..3. Both Ours and KLKL25 run under identical N so cross-impl ratios stay clean; absolute wall numbers are ~1.5× higher than single-core boost (all-core boost ~4.3 GHz vs single-core ~4.7 GHz on i7-8700K) and pay some shared-L3 contention. |
 | Memory | (system default; not RSS-constrained) |
 | OS | WSL2 Ubuntu, kernel `6.6.114.1-microsoft-standard-WSL2` |
 | Compiler | GCC 11.4.0 (Ubuntu `11.4.0-1ubuntu1~22.04.3`) |
