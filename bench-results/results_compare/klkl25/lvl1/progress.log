@@ -30,3 +30,29 @@
 [2026-05-21 16:30:57] === lvl1 / keypair done: 20 valid / 20 attempts
 [2026-05-21 16:30:57] === lvl1 / sign start: target=20, hard_cap=80, per-iter timeout=600s, pin=core 0
 [2026-05-21 16:31:56]   lvl1 / sign iter=1 dur=59s exit=0 retries=0 wall=31.626469s  (valid=1/20)
+[2026-05-21 16:34:31]   lvl1 / sign iter=2 dur=155s exit=0 retries=3 wall=144.347981s  (valid=2/20)
+[2026-05-21 16:44:31]   lvl1 / sign iter=3 dur=600s exit=124 — not counted
+[2026-05-21 16:46:01]   lvl1 / sign iter=4 dur=90s exit=0 retries=2 wall=86.417838s  (valid=3/20)
+[2026-05-21 16:47:04]   lvl1 / sign iter=5 dur=63s exit=0 retries=1 wall=40.124577s  (valid=4/20)
+[2026-05-21 16:57:04]   lvl1 / sign iter=6 dur=600s exit=124 — not counted
+[2026-05-21 16:59:53]   lvl1 / sign iter=7 dur=169s exit=0 retries=4 wall=139.648395s  (valid=5/20)
+[2026-05-21 17:09:53]   lvl1 / sign iter=8 dur=600s exit=124 — not counted
+[2026-05-21 17:11:42]   lvl1 / sign iter=9 dur=109s exit=0 retries=1 wall=105.476919s  (valid=6/20)
+[2026-05-21 17:19:25] ###### run_until20.sh start (phase-separated)
+[2026-05-21 17:19:25]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/SQIsign-Fixed-Precision/build OUT=/root/sqisign-fp-bench/results_compare/klkl25/lvl1
+[2026-05-21 17:19:25]       LEVELS=lvl1  PHASES=sign verify
+[2026-05-21 17:19:25]       VALID_TARGET=20  HARD_ATTEMPT_CAP=200
+[2026-05-21 17:19:25]       timeouts: lvl1=300s lvl3=1800s lvl5=3600s
+[2026-05-21 17:19:25]       cpu: Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz
+[2026-05-21 17:19:25]       compiler: cc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
+[2026-05-21 17:19:25]       kernel: 6.6.114.1-microsoft-standard-WSL2
+[2026-05-21 17:19:25] === lvl1 / sign start: target=20, hard_cap=200, per-iter timeout=300s, pin=core 0
+[2026-05-21 17:19:33] ###### run_until20.sh start (phase-separated)
+[2026-05-21 17:19:33]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/SQIsign-Fixed-Precision/build OUT=/root/sqisign-fp-bench/results_compare/klkl25/lvl1
+[2026-05-21 17:19:33]       LEVELS=lvl1  PHASES=sign verify
+[2026-05-21 17:19:33]       VALID_TARGET=20  HARD_ATTEMPT_CAP=200
+[2026-05-21 17:19:33]       timeouts: lvl1=300s lvl3=1800s lvl5=3600s
+[2026-05-21 17:19:33]       cpu: Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz
+[2026-05-21 17:19:33]       compiler: cc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
+[2026-05-21 17:19:33]       kernel: 6.6.114.1-microsoft-standard-WSL2
+[2026-05-21 17:19:33] === lvl1 / sign start: target=20, hard_cap=200, per-iter timeout=300s, pin=core 0

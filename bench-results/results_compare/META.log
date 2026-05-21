@@ -77,3 +77,9 @@
 [ours/lvl1] [2026-05-21 16:22:50] === lvl1 / verify done: 20 valid / 20 attempts
 [ours/lvl1] [2026-05-21 16:22:50] ###### run_until20.sh end
 [2026-05-21 16:22:50] [meta] >>> START  impl=klkl25  level=lvl1  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl1  build=/root/SQIsign-Fixed-Precision/build
+[2026-05-21 17:19:25] [meta] ###### run_compare.sh resume (skip Ours lvl1; KLKL25 lvl1 sign+verify only; then Ours lvl3/5; KLKL25 lvl3/5)
+[2026-05-21 17:19:25] [meta]       defaults updated: TIMEOUT_LVL1=300s, TIMEOUT_LVL3=1800s, TIMEOUT_LVL5=3600s, HARD_ATTEMPT_CAP=200
+[2026-05-21 17:19:25] [meta] >>> START  impl=klkl25  level=lvl1  phases=sign verify  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl1  build=/root/SQIsign-Fixed-Precision/build
+[2026-05-21 17:19:33] [meta] ###### run_compare.sh resume (skip Ours lvl1; KLKL25 lvl1 sign+verify only; then Ours lvl3/5; KLKL25 lvl3/5)
+[2026-05-21 17:19:33] [meta]       defaults updated: TIMEOUT_LVL1=300s, TIMEOUT_LVL3=1800s, TIMEOUT_LVL5=3600s, HARD_ATTEMPT_CAP=200
+[2026-05-21 17:19:33] [meta] >>> START  impl=klkl25  level=lvl1  phases=sign verify  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl1  build=/root/SQIsign-Fixed-Precision/build
