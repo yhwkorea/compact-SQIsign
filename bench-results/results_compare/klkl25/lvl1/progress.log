@@ -56,3 +56,6 @@
 [2026-05-21 17:19:33]       compiler: cc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
 [2026-05-21 17:19:33]       kernel: 6.6.114.1-microsoft-standard-WSL2
 [2026-05-21 17:19:33] === lvl1 / sign start: target=20, hard_cap=200, per-iter timeout=300s, pin=core 0
+[2026-05-21 17:20:36]   lvl1 / sign iter=1 dur=71s exit=0 retries=0 wall=35.416139s  (valid=1/20)
+[2026-05-21 17:21:51]   lvl1 / sign iter=2 dur=75s exit=0 retries=0 wall=45.637076s  (valid=2/20)
+[2026-05-21 17:24:52]   lvl1 / sign iter=3 dur=181s exit=0 retries=4 wall=134.985038s  (valid=3/20)

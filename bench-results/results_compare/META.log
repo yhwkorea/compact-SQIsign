@@ -83,3 +83,7 @@
 [2026-05-21 17:19:33] [meta] ###### run_compare.sh resume (skip Ours lvl1; KLKL25 lvl1 sign+verify only; then Ours lvl3/5; KLKL25 lvl3/5)
 [2026-05-21 17:19:33] [meta]       defaults updated: TIMEOUT_LVL1=300s, TIMEOUT_LVL3=1800s, TIMEOUT_LVL5=3600s, HARD_ATTEMPT_CAP=200
 [2026-05-21 17:19:33] [meta] >>> START  impl=klkl25  level=lvl1  phases=sign verify  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl1  build=/root/SQIsign-Fixed-Precision/build
+[2026-05-21 17:33:05] [meta] ###### run_compare.sh resume (Ours lvl1 @ paper bound 28-limb; KLKL25 lvl1 sign+verify only; then Ours lvl3/5; KLKL25 lvl3/5)
+[2026-05-21 17:33:05] [meta]       defaults: TIMEOUT_LVL1=300s, TIMEOUT_LVL3=1800s, TIMEOUT_LVL5=3600s, HARD_ATTEMPT_CAP=200
+[2026-05-21 17:33:05] [meta]       Ours uses paper bound IBZ_LIMBS_{lvl1=28, lvl3=43, lvl5=56}; 110-limb baseline preserved at ours/lvl1_110limb_OLD
+[2026-05-21 17:33:05] [meta] >>> START  impl=ours  level=lvl1  phases=keypair sign verify  out=/root/sqisign-fp-bench/results_compare/ours/lvl1  build=/root/compact-SQIsign/build
