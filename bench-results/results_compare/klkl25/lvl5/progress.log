@@ -16,3 +16,7 @@
 [2026-05-22 07:47:34]   lvl5 / keypair iter=10 core=1 dur=2600s exit=124 — not counted
 [2026-05-22 07:47:34]   lvl5 / keypair iter=11 core=3 dur=2600s exit=124 — not counted
 [2026-05-22 07:47:34]   lvl5 / keypair iter=12 core=2 dur=2600s exit=124 — not counted
+[2026-05-22 08:30:54]   lvl5 / keypair iter=13 core=0 dur=2600s exit=124 — not counted
+[2026-05-22 08:30:54]   lvl5 / keypair iter=14 core=1 dur=2600s exit=124 — not counted
+[2026-05-22 08:30:54]   lvl5 / keypair iter=15 core=3 dur=2600s exit=124 — not counted
+[2026-05-22 08:30:54]   lvl5 / keypair iter=16 core=2 dur=2600s exit=124 — not counted
