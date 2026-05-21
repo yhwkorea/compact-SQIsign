@@ -83,3 +83,104 @@
 [ours/lvl1] [2026-05-21 19:52:08] === lvl1 / verify done: 23 valid / 23 attempts (parallel N=4)
 [ours/lvl1] [2026-05-21 19:52:08] ###### run_until20_parallel.sh end
 [2026-05-21 19:52:08] [meta] >>> START  impl=klkl25  level=lvl1  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl1  build=/root/SQIsign-Fixed-Precision/build
+[2026-05-21 20:54:38] [meta] <<< DONE   impl=klkl25  level=lvl1  rc=0
+[klkl25/lvl1] [2026-05-21 19:52:08] ###### run_until20_parallel.sh start
+[klkl25/lvl1] [2026-05-21 19:52:08]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/SQIsign-Fixed-Precision/build OUT=/root/sqisign-fp-bench/results_compare/klkl25/lvl1
+[klkl25/lvl1] [2026-05-21 19:52:08]       LEVELS=lvl1  PHASES=keypair sign verify  PARALLEL=4
+[klkl25/lvl1] [2026-05-21 19:52:08]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
+[klkl25/lvl1] [2026-05-21 19:52:08]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s
+[klkl25/lvl1] [2026-05-21 19:52:08] === lvl1 / keypair start (parallel N=4): target=20, hard_cap=300, per-iter timeout=350s
+[klkl25/lvl1] [2026-05-21 19:52:21]   lvl1 / keypair iter=4 core=3 dur=13s exit=0 retries=? wall=13.210509s  (valid=1/20)
+[klkl25/lvl1] [2026-05-21 19:52:25]   lvl1 / keypair iter=3 core=2 dur=17s exit=0 retries=? wall=17.149064s  (valid=2/20)
+[klkl25/lvl1] [2026-05-21 19:52:29]   lvl1 / keypair iter=2 core=1 dur=21s exit=0 retries=? wall=20.824291s  (valid=3/20)
+[klkl25/lvl1] [2026-05-21 19:52:41]   lvl1 / keypair iter=1 core=0 dur=33s exit=0 retries=? wall=33.258148s  (valid=4/20)
+[klkl25/lvl1] [2026-05-21 19:52:42]   lvl1 / keypair iter=7 core=1 dur=13s exit=0 retries=? wall=13.837405s  (valid=5/20)
+[klkl25/lvl1] [2026-05-21 19:52:53]   lvl1 / keypair iter=8 core=0 dur=12s exit=0 retries=? wall=11.664095s  (valid=6/20)
+[klkl25/lvl1] [2026-05-21 19:52:53]   lvl1 / keypair iter=6 core=2 dur=28s exit=0 retries=? wall=27.825707s  (valid=7/20)
+[klkl25/lvl1] [2026-05-21 19:53:08]   lvl1 / keypair iter=5 core=3 dur=47s exit=0 retries=? wall=46.544469s  (valid=8/20)
+[klkl25/lvl1] [2026-05-21 19:53:08]   lvl1 / keypair iter=10 core=0 dur=15s exit=0 retries=? wall=15.657084s  (valid=9/20)
+[klkl25/lvl1] [2026-05-21 19:53:11]   lvl1 / keypair iter=9 core=1 dur=29s exit=0 retries=? wall=28.184508s  (valid=10/20)
+[klkl25/lvl1] [2026-05-21 19:53:20]   lvl1 / keypair iter=11 core=2 dur=27s exit=0 retries=? wall=27.273186s  (valid=11/20)
+[klkl25/lvl1] [2026-05-21 19:53:20]   lvl1 / keypair iter=12 core=3 dur=12s exit=0 retries=? wall=12.880142s  (valid=12/20)
+[klkl25/lvl1] [2026-05-21 19:53:21]   lvl1 / keypair iter=13 core=0 dur=13s exit=0 retries=? wall=12.223479s  (valid=13/20)
+[klkl25/lvl1] [2026-05-21 19:53:28]   lvl1 / keypair iter=16 core=3 dur=8s exit=0 retries=? wall=7.437945s  (valid=14/20)
+[klkl25/lvl1] [2026-05-21 19:53:39]   lvl1 / keypair iter=17 core=0 dur=18s exit=0 retries=? wall=18.211800s  (valid=15/20)
+[klkl25/lvl1] [2026-05-21 19:53:40]   lvl1 / keypair iter=14 core=1 dur=29s exit=0 retries=? wall=29.437631s  (valid=16/20)
+[klkl25/lvl1] [2026-05-21 19:53:44]   lvl1 / keypair iter=15 core=2 dur=24s exit=0 retries=? wall=23.492090s  (valid=17/20)
+[klkl25/lvl1] [2026-05-21 19:53:48]   lvl1 / keypair iter=18 core=3 dur=20s exit=0 retries=? wall=19.681950s  (valid=18/20)
+[klkl25/lvl1] [2026-05-21 19:53:49]   lvl1 / keypair iter=21 core=2 dur=5s exit=0 retries=? wall=5.423453s  (valid=19/20)
+[klkl25/lvl1] [2026-05-21 19:53:54]   lvl1 / keypair iter=20 core=1 dur=14s exit=0 retries=? wall=13.896567s  (valid=20/20)
+[klkl25/lvl1] [2026-05-21 19:54:08]   lvl1 / keypair iter=19 core=0 dur=29s exit=0 retries=? wall=28.655924s  (valid=21/20)
+[klkl25/lvl1] [2026-05-21 19:54:20]   lvl1 / keypair iter=23 core=2 dur=31s exit=0 retries=? wall=31.293118s  (valid=22/20)
+[klkl25/lvl1] [2026-05-21 19:54:23]   lvl1 / keypair iter=22 core=3 dur=35s exit=0 retries=? wall=35.252929s  (valid=23/20)
+[klkl25/lvl1] [2026-05-21 19:54:23] === lvl1 / keypair done: 23 valid / 23 attempts (parallel N=4)
+[klkl25/lvl1] [2026-05-21 19:54:23] === lvl1 / sign start (parallel N=4): target=20, hard_cap=300, per-iter timeout=350s
+[klkl25/lvl1] [2026-05-21 19:55:29]   lvl1 / sign iter=2 core=1 dur=66s exit=0 retries=0 wall=37.480471s  (valid=1/20)
+[klkl25/lvl1] [2026-05-21 19:57:30]   lvl1 / sign iter=3 core=2 dur=187s exit=0 retries=5 wall=153.370338s  (valid=2/20)
+[klkl25/lvl1] [2026-05-21 19:58:26]   lvl1 / sign iter=6 core=2 dur=56s exit=0 retries=0 wall=16.539400s  (valid=3/20)
+[klkl25/lvl1] [2026-05-21 20:00:13]   lvl1 / sign iter=1 core=0 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:00:13]   lvl1 / sign iter=4 core=3 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:01:19]   lvl1 / sign iter=5 core=1 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:01:37]   lvl1 / sign iter=7 core=2 dur=191s exit=0 retries=5 wall=156.120962s  (valid=4/20)
+[klkl25/lvl1] [2026-05-21 20:02:20]   lvl1 / sign iter=10 core=1 dur=61s exit=0 retries=0 wall=30.796210s  (valid=5/20)
+[klkl25/lvl1] [2026-05-21 20:03:28]   lvl1 / sign iter=12 core=1 dur=68s exit=0 retries=0 wall=64.351326s  (valid=6/20)
+[klkl25/lvl1] [2026-05-21 20:04:40]   lvl1 / sign iter=13 core=1 dur=72s exit=0 retries=0 wall=52.633117s  (valid=7/20)
+[klkl25/lvl1] [2026-05-21 20:05:11]   lvl1 / sign iter=14 core=1 dur=31s exit=0 retries=0 wall=23.509201s  (valid=8/20)
+[klkl25/lvl1] [2026-05-21 20:06:03]   lvl1 / sign iter=8 core=0 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:06:03]   lvl1 / sign iter=9 core=3 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:07:27]   lvl1 / sign iter=11 core=2 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:07:58]   lvl1 / sign iter=15 core=1 dur=167s exit=0 retries=3 wall=150.972772s  (valid=9/20)
+[klkl25/lvl1] [2026-05-21 20:08:45]   lvl1 / sign iter=18 core=2 dur=78s exit=0 retries=1 wall=69.599684s  (valid=10/20)
+[klkl25/lvl1] [2026-05-21 20:09:08]   lvl1 / sign iter=16 core=0 dur=184s exit=0 retries=3 wall=163.042327s  (valid=11/20)
+[klkl25/lvl1] [2026-05-21 20:09:53]   lvl1 / sign iter=20 core=2 dur=68s exit=0 retries=0 wall=34.971730s  (valid=12/20)
+[klkl25/lvl1] [2026-05-21 20:10:10]   lvl1 / sign iter=19 core=1 dur=132s exit=0 retries=2 wall=102.146112s  (valid=13/20)
+[klkl25/lvl1] [2026-05-21 20:11:12]   lvl1 / sign iter=21 core=0 dur=124s exit=0 retries=1 wall=111.857380s  (valid=14/20)
+[klkl25/lvl1] [2026-05-21 20:11:16]   lvl1 / sign iter=22 core=2 dur=83s exit=0 retries=0 wall=42.445212s  (valid=15/20)
+[klkl25/lvl1] [2026-05-21 20:11:47]   lvl1 / sign iter=17 core=3 dur=344s exit=0 retries=8 wall=333.446834s  (valid=16/20)
+[klkl25/lvl1] [2026-05-21 20:12:04]   lvl1 / sign iter=24 core=0 dur=52s exit=0 retries=1 wall=38.336106s  (valid=17/20)
+[klkl25/lvl1] [2026-05-21 20:15:04]   lvl1 / sign iter=26 core=3 dur=197s exit=0 retries=3 wall=167.907794s  (valid=18/20)
+[klkl25/lvl1] [2026-05-21 20:16:00]   lvl1 / sign iter=23 core=1 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:17:06]   lvl1 / sign iter=25 core=2 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:17:54]   lvl1 / sign iter=27 core=0 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:18:09]   lvl1 / sign iter=30 core=2 dur=63s exit=0 retries=0 wall=36.719561s  (valid=19/20)
+[klkl25/lvl1] [2026-05-21 20:20:13]   lvl1 / sign iter=28 core=3 dur=309s exit=0 retries=11 wall=271.574688s  (valid=20/20)
+[klkl25/lvl1] [2026-05-21 20:21:50]   lvl1 / sign iter=29 core=1 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:23:44]   lvl1 / sign iter=31 core=0 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:23:59]   lvl1 / sign iter=32 core=2 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:23:59] === lvl1 / sign done: 20 valid / 32 attempts (parallel N=4)
+[klkl25/lvl1] [2026-05-21 20:23:59] === lvl1 / verify start (parallel N=4): target=20, hard_cap=300, per-iter timeout=350s
+[klkl25/lvl1] [2026-05-21 20:25:05]   lvl1 / verify iter=2 core=1 dur=66s exit=0 retries=1 wall=0.003166s  (valid=1/20)
+[klkl25/lvl1] [2026-05-21 20:26:44]   lvl1 / verify iter=5 core=1 dur=99s exit=0 retries=1 wall=0.001521s  (valid=2/20)
+[klkl25/lvl1] [2026-05-21 20:28:20]   lvl1 / verify iter=6 core=1 dur=96s exit=0 retries=0 wall=0.002728s  (valid=3/20)
+[klkl25/lvl1] [2026-05-21 20:28:52]   lvl1 / verify iter=1 core=2 dur=293s exit=0 retries=10 wall=0.001559s  (valid=4/20)
+[klkl25/lvl1] [2026-05-21 20:29:16]   lvl1 / verify iter=7 core=1 dur=56s exit=0 retries=0 wall=0.001466s  (valid=5/20)
+[klkl25/lvl1] [2026-05-21 20:29:49]   lvl1 / verify iter=3 core=0 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:29:49]   lvl1 / verify iter=4 core=3 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:30:53]   lvl1 / verify iter=9 core=1 dur=97s exit=0 retries=1 wall=0.001497s  (valid=6/20)
+[klkl25/lvl1] [2026-05-21 20:31:30]   lvl1 / verify iter=10 core=0 dur=101s exit=0 retries=2 wall=0.001486s  (valid=7/20)
+[klkl25/lvl1] [2026-05-21 20:33:18]   lvl1 / verify iter=11 core=3 dur=209s exit=0 retries=6 wall=0.001441s  (valid=8/20)
+[klkl25/lvl1] [2026-05-21 20:34:23]   lvl1 / verify iter=14 core=3 dur=65s exit=0 retries=1 wall=0.001469s  (valid=9/20)
+[klkl25/lvl1] [2026-05-21 20:34:42]   lvl1 / verify iter=8 core=2 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:35:00]   lvl1 / verify iter=13 core=0 dur=210s exit=0 retries=6 wall=0.002976s  (valid=10/20)
+[klkl25/lvl1] [2026-05-21 20:35:58]   lvl1 / verify iter=15 core=3 dur=95s exit=0 retries=1 wall=0.002872s  (valid=11/20)
+[klkl25/lvl1] [2026-05-21 20:36:43]   lvl1 / verify iter=12 core=1 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:40:32]   lvl1 / verify iter=16 core=2 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:40:50]   lvl1 / verify iter=17 core=0 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:41:02]   lvl1 / verify iter=19 core=1 dur=259s exit=0 retries=9 wall=0.001485s  (valid=12/20)
+[klkl25/lvl1] [2026-05-21 20:41:48]   lvl1 / verify iter=18 core=3 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:42:16]   lvl1 / verify iter=21 core=0 dur=85s exit=0 retries=0 wall=0.001516s  (valid=13/20)
+[klkl25/lvl1] [2026-05-21 20:42:16]   lvl1 / verify iter=20 core=2 dur=104s exit=0 retries=1 wall=0.001530s  (valid=14/20)
+[klkl25/lvl1] [2026-05-21 20:44:24]   lvl1 / verify iter=22 core=1 dur=202s exit=0 retries=4 wall=0.001454s  (valid=15/20)
+[klkl25/lvl1] [2026-05-21 20:46:05]   lvl1 / verify iter=26 core=1 dur=101s exit=0 retries=4 wall=0.001497s  (valid=16/20)
+[klkl25/lvl1] [2026-05-21 20:46:12]   lvl1 / verify iter=25 core=2 dur=236s exit=0 retries=6 wall=0.002921s  (valid=17/20)
+[klkl25/lvl1] [2026-05-21 20:47:38]   lvl1 / verify iter=23 core=3 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:48:06]   lvl1 / verify iter=24 core=0 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:48:28]   lvl1 / verify iter=27 core=1 dur=143s exit=0 retries=2 wall=0.001493s  (valid=18/20)
+[klkl25/lvl1] [2026-05-21 20:48:48]   lvl1 / verify iter=28 core=2 dur=156s exit=0 retries=4 wall=0.001481s  (valid=19/20)
+[klkl25/lvl1] [2026-05-21 20:51:20]   lvl1 / verify iter=30 core=0 dur=194s exit=0 retries=6 wall=0.001483s  (valid=20/20)
+[klkl25/lvl1] [2026-05-21 20:51:32]   lvl1 / verify iter=29 core=3 dur=234s exit=0 retries=7 wall=0.001493s  (valid=21/20)
+[klkl25/lvl1] [2026-05-21 20:53:20]   lvl1 / verify iter=31 core=1 dur=292s exit=0 retries=8 wall=0.001494s  (valid=22/20)
+[klkl25/lvl1] [2026-05-21 20:54:38]   lvl1 / verify iter=32 core=2 dur=350s exit=124 — not counted
+[klkl25/lvl1] [2026-05-21 20:54:38] === lvl1 / verify done: 22 valid / 32 attempts (parallel N=4)
+[klkl25/lvl1] [2026-05-21 20:54:38] ###### run_until20_parallel.sh end
+[2026-05-21 20:54:38] [meta] >>> START  impl=ours  level=lvl3  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/ours/lvl3  build=/root/compact-SQIsign/build
