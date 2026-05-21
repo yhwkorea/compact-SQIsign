@@ -67,3 +67,9 @@
 [2026-05-21 18:03:11]   lvl1 / verify iter=14 dur=74s exit=0 retries=0 wall=0.001480s  (valid=14/20)
 [2026-05-21 18:03:56]   lvl1 / verify iter=15 dur=45s exit=0 retries=0 wall=0.001498s  (valid=15/20)
 [2026-05-21 18:04:23]   lvl1 / verify iter=16 dur=27s exit=0 retries=0 wall=0.001453s  (valid=16/20)
+[2026-05-21 18:05:20]   lvl1 / verify iter=17 dur=57s exit=0 retries=0 wall=0.001500s  (valid=17/20)
+[2026-05-21 18:05:54]   lvl1 / verify iter=18 dur=34s exit=0 retries=0 wall=0.001646s  (valid=18/20)
+[2026-05-21 18:06:35]   lvl1 / verify iter=19 dur=41s exit=0 retries=0 wall=0.001510s  (valid=19/20)
+[2026-05-21 18:07:13]   lvl1 / verify iter=20 dur=38s exit=0 retries=0 wall=0.001469s  (valid=20/20)
+[2026-05-21 18:07:13] === lvl1 / verify done: 20 valid / 20 attempts
+[2026-05-21 18:07:13] ###### run_until20.sh end

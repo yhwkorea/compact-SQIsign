@@ -59,3 +59,12 @@
 [2026-05-21 17:20:36]   lvl1 / sign iter=1 dur=71s exit=0 retries=0 wall=35.416139s  (valid=1/20)
 [2026-05-21 17:21:51]   lvl1 / sign iter=2 dur=75s exit=0 retries=0 wall=45.637076s  (valid=2/20)
 [2026-05-21 17:24:52]   lvl1 / sign iter=3 dur=181s exit=0 retries=4 wall=134.985038s  (valid=3/20)
+[2026-05-21 18:07:13] ###### run_until20.sh start (phase-separated)
+[2026-05-21 18:07:13]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/SQIsign-Fixed-Precision/build OUT=/root/sqisign-fp-bench/results_compare/klkl25/lvl1
+[2026-05-21 18:07:13]       LEVELS=lvl1  PHASES=sign verify
+[2026-05-21 18:07:13]       VALID_TARGET=20  HARD_ATTEMPT_CAP=200
+[2026-05-21 18:07:13]       timeouts: lvl1=300s lvl3=1800s lvl5=3600s
+[2026-05-21 18:07:13]       cpu: Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz
+[2026-05-21 18:07:13]       compiler: cc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
+[2026-05-21 18:07:13]       kernel: 6.6.114.1-microsoft-standard-WSL2
+[2026-05-21 18:07:13] === lvl1 / sign start: target=20, hard_cap=200, per-iter timeout=300s, pin=core 0
