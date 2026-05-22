@@ -91,8 +91,9 @@ cmake -B build -DSQISIGN_BUILD_TYPE=broadwell -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-`KLKL25` is the upstream baseline (`munsanwon2/SQIsign-Fixed-Precision`),
-defaulting to `{110, 168, 222}` limbs. It needs five patches before it can be
+`KLKL25` is the reference implementation accompanying the prior work cited as
+KLKL25 (URL withheld for double-blind review), defaulting to
+`{110, 168, 222}` limbs. It needs five patches before it can be
 benchmarked cleanly; the patches and their justification are documented at the
 top of [`bench-results/README.md`](bench-results/README.md) (sections
 "Patches applied"). After patching:
