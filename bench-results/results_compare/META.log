@@ -462,3 +462,31 @@
 [klkl25/lvl3] [2026-05-22 05:37:34] === lvl3 / verify done: 22 valid / 35 attempts (parallel N=4)
 [klkl25/lvl3] [2026-05-22 05:37:34] ###### run_until20_parallel.sh end
 [2026-05-22 05:37:34] [meta] >>> START  impl=klkl25  level=lvl5  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl5  build=/root/SQIsign-Fixed-Precision/build
+[2026-05-22 09:26:24] [meta] <<< DONE   impl=klkl25  level=lvl5  rc=137
+[klkl25/lvl5] [2026-05-22 05:37:34] ###### run_until20_parallel.sh start
+[klkl25/lvl5] [2026-05-22 05:37:34]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/SQIsign-Fixed-Precision/build OUT=/root/sqisign-fp-bench/results_compare/klkl25/lvl5
+[klkl25/lvl5] [2026-05-22 05:37:34]       LEVELS=lvl5  PHASES=keypair sign verify  PARALLEL=4
+[klkl25/lvl5] [2026-05-22 05:37:34]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
+[klkl25/lvl5] [2026-05-22 05:37:34]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s
+[klkl25/lvl5] [2026-05-22 05:37:34] === lvl5 / keypair start (parallel N=4): target=20, hard_cap=300, per-iter timeout=2600s
+[klkl25/lvl5] [2026-05-22 06:20:54]   lvl5 / keypair iter=1 core=0 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 06:20:54]   lvl5 / keypair iter=2 core=1 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 06:20:54]   lvl5 / keypair iter=4 core=3 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 06:20:54]   lvl5 / keypair iter=3 core=2 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 07:04:14]   lvl5 / keypair iter=5 core=0 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 07:04:14]   lvl5 / keypair iter=6 core=1 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 07:04:14]   lvl5 / keypair iter=7 core=3 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 07:04:14]   lvl5 / keypair iter=8 core=2 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 07:47:34]   lvl5 / keypair iter=9 core=0 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 07:47:34]   lvl5 / keypair iter=10 core=1 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 07:47:34]   lvl5 / keypair iter=11 core=3 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 07:47:34]   lvl5 / keypair iter=12 core=2 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 08:30:54]   lvl5 / keypair iter=13 core=0 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 08:30:54]   lvl5 / keypair iter=14 core=1 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 08:30:54]   lvl5 / keypair iter=15 core=3 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 08:30:54]   lvl5 / keypair iter=16 core=2 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 09:14:14]   lvl5 / keypair iter=17 core=0 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 09:14:14]   lvl5 / keypair iter=18 core=1 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 09:14:14]   lvl5 / keypair iter=19 core=3 dur=2600s exit=124 — not counted
+[klkl25/lvl5] [2026-05-22 09:14:14]   lvl5 / keypair iter=20 core=2 dur=2600s exit=124 — not counted
+[2026-05-22 09:26:24] [meta] ###### run_compare.sh end
