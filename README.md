@@ -1,8 +1,8 @@
 # compact-SQIsign
 
-A C implementation of SQIsign with the lattice-reduction (MLLL / ML2) ideal
-arithmetic replacing Hermite Normal Form, allowing the multi-precision integer
-width to shrink from the upstream `{110, 168, 222}` limbs (KLKL25 baseline) to
+A fixed-precision C implementation of SQIsign with the algorithms in the paper
+"Compact Quaternion Algorithms for SQIsign", allowing the precision
+width to shrink from the upstream `{110, 168, 222}` limbs (https://github.com/munsanwon2/SQIsign-Fixed-Precision) to
 the paper's `{28, 43, 56}` limbs at NIST levels I / III / V.
 
 The `IBZ_LIMBS_lvl{1,3,5}` defaults in
@@ -15,6 +15,12 @@ The `IBZ_LIMBS_lvl{1,3,5}` defaults in
 - C11-compatible compiler
 - GMP is **not** required (the mini-gmp shipped under `src/mini-gmp/` is used
   when needed, but the default build uses fixed-precision arithmetic).
+- **Low Memory** is now allowed!
+
+### Pre-computation
+
+The constant values in the 'src/precomp' directory were generated using the pre-computation scripts in the scripts/precomp directory.
+It is not necessary to execute these scripts to compile the project.
 
 ## Build
 
@@ -214,21 +220,22 @@ pqm4-compatible folder layout in `src/pqm4/sqisign_lvl{1,3,5}`.
 The reference finite-field arithmetic (`src/gf/ref`) was generated with
 [`modarith`](https://github.com/mcarrickscott/modarith) by Michael Scott.
 
+Our implementation is based on the original SQIsign implementation (https://github.com/SQIsign/the-sqisign) and the original SQIsign with fixed-precision implementation (https://github.com/munsanwon2/SQIsign-Fixed-Precision).
+
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. See [[LICENSE](LICENSE)](https://github.com/SQISign/the-sqisign/blob/main/LICENSE) and [[NOTICE](NOTICE)](https://github.com/SQISign/the-sqisign/blob/main/NOTICE).
 
 Third-party code retains its original license:
 
-- `src/common/aes_c.c` — MIT, © 2016 Thomas Pornin
+- `src/common/aes_c.c` — MIT, © 2016 Thomas Pornin pornin@bolet.org
 - `src/common/fips202.c` — CC0, © 2023 the PQClean team
-- `src/common/randombytes_system.c` — MIT, © 2017 Daan Sprenkels
+- `src/common/randombytes_system.c` — MIT, © 2017 Daan Sprenkels hello@dsprenkels.com
 - `src/common/broadwell/{aes_ni.c, vaes256_key_expansion.S}` — Apache-2.0,
   © 2019 Amazon.com, Inc.
 - `src/common/broadwell/ctr_drbg.c` — ISC, © 2017 Google Inc.
-- `src/mini-gmp/mini-gmp.{c,h}` — LGPLv3, © 1991–2022 Free Software Foundation
+- `src/mini-gmp/mini-gmp.{c,h}` — LGPLv3, © 1991–2022 Free Software Foundation, Inc.
 - `src/quaternion/ref/generic/dpe.h` — LGPLv3, © 2004–2024 Patrick Pélissier,
   Paul Zimmermann, LORIA/INRIA
 - `apps/PQCgenKAT_sign.c`, `apps/PQCgenKAT_sign_pqm4.c`,
-  `src/common/ref/randombytes_ctrdrbg.c`, `test/test_kat.c` — Public Domain
-  (NIST)
+  `src/common/ref/randombytes_ctrdrbg.c`, `test/test_kat.c` — by NIST (Public Domain)
