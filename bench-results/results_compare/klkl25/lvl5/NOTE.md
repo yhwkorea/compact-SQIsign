@@ -23,15 +23,19 @@ Concretely:
 ## Verify, however, is measurable
 
 Verify itself runs on the EC side and does not pay the 222-limb LLL cost,
-so it is fast even at lvl5. We measure it from precomputed KAT data
-(`KAT/PQCsignKAT_701_SQIsign_lvl5.rsp`, entry `count = 0`) using a new
-`apps/benchmark_verify_from_kat.c` driver shipped in the patched KLKL25
-zip (`PATCHES.md`, patch 8). The driver reads `(pk, m, sm)` from the KAT
-file and times `crypto_sign_open` 20 times.
+so it is fast even at lvl5. We measure it from precomputed KAT data —
+specifically the `(pk, m, sm)` triple stored at `count = 0` of the upstream
+NIST KAT file `KAT/PQCsignKAT_701_SQIsign_lvl5.rsp` shipped with the
+KLKL25 baseline. A small `apps/benchmark_verify_from_kat.c` driver opens
+that KAT entry, reads `(pk, m, sm)` directly, and times
+`crypto_sign_open` 20 times. KeyGen and Sign are skipped entirely.
 
 This is methodologically equivalent to measuring Verify after a successful
 KeyGen + Sign: the same `crypto_sign_open` codepath runs on the same
-fixed-precision arithmetic, regardless of where the (pk, sm) came from.
+fixed-precision arithmetic, regardless of where the `(pk, sm)` triple
+came from. Each verify call exercises identical EC operations on
+identically-sized inputs, so per-call wall time matches what an in-band
+sign-then-verify would have measured.
 
 ## Files
 
