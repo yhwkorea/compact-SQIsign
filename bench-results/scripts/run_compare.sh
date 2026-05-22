@@ -12,10 +12,10 @@
 
 set -u
 
-KLKL25_BUILD="${KLKL25_BUILD:-/root/SQIsign-Fixed-Precision/build}"
-OURS_BUILD="${OURS_BUILD:-/root/compact-SQIsign/build}"
-OUT_BASE="${OUT_BASE:-/root/sqisign-fp-bench/results_compare}"
-DRIVER="${DRIVER:-/root/sqisign-fp-bench/run_until20_parallel.sh}"
+KLKL25_BUILD="${KLKL25_BUILD:-<path>/SQIsign-Fixed-Precision/build}"
+OURS_BUILD="${OURS_BUILD:-<path>/compact-SQIsign/build}"
+OUT_BASE="${OUT_BASE:-<path>/sqisign-fp-bench/results_compare}"
+DRIVER="${DRIVER:-<path>/sqisign-fp-bench/run_until20_parallel.sh}"
 export PARALLEL="${PARALLEL:-4}"
 
 mkdir -p "$OUT_BASE"

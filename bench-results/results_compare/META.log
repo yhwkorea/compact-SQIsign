@@ -1,8 +1,8 @@
 [2026-05-21 19:39:37] [meta] ###### run_compare.sh restart (PARALLEL=4, full redo for fair comparison)
-[2026-05-21 19:39:37] [meta] >>> START  impl=ours  level=lvl1  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/ours/lvl1  build=/root/compact-SQIsign/build
+[2026-05-21 19:39:37] [meta] >>> START  impl=ours  level=lvl1  phases=keypair sign verify  N=4  out=<path>/sqisign-fp-bench/results_compare/ours/lvl1  build=<path>/compact-SQIsign/build
 [2026-05-21 19:52:08] [meta] <<< DONE   impl=ours  level=lvl1  rc=0
 [ours/lvl1] [2026-05-21 19:39:37] ###### run_until20_parallel.sh start
-[ours/lvl1] [2026-05-21 19:39:37]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/compact-SQIsign/build OUT=/root/sqisign-fp-bench/results_compare/ours/lvl1
+[ours/lvl1] [2026-05-21 19:39:37]       REPO=<path>/SQIsign-Fixed-Precision BUILD=<path>/compact-SQIsign/build OUT=<path>/sqisign-fp-bench/results_compare/ours/lvl1
 [ours/lvl1] [2026-05-21 19:39:37]       LEVELS=lvl1  PHASES=keypair sign verify  PARALLEL=4
 [ours/lvl1] [2026-05-21 19:39:37]       VALID_TARGET=20  HARD_ATTEMPT_CAP=200
 [ours/lvl1] [2026-05-21 19:39:37]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s
@@ -82,10 +82,10 @@
 [ours/lvl1] [2026-05-21 19:52:08]   lvl1 / verify iter=23 core=0 dur=69s exit=0 retries=0 wall=0.001381s  (valid=23/20)
 [ours/lvl1] [2026-05-21 19:52:08] === lvl1 / verify done: 23 valid / 23 attempts (parallel N=4)
 [ours/lvl1] [2026-05-21 19:52:08] ###### run_until20_parallel.sh end
-[2026-05-21 19:52:08] [meta] >>> START  impl=klkl25  level=lvl1  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl1  build=/root/SQIsign-Fixed-Precision/build
+[2026-05-21 19:52:08] [meta] >>> START  impl=klkl25  level=lvl1  phases=keypair sign verify  N=4  out=<path>/sqisign-fp-bench/results_compare/klkl25/lvl1  build=<path>/SQIsign-Fixed-Precision/build
 [2026-05-21 20:54:38] [meta] <<< DONE   impl=klkl25  level=lvl1  rc=0
 [klkl25/lvl1] [2026-05-21 19:52:08] ###### run_until20_parallel.sh start
-[klkl25/lvl1] [2026-05-21 19:52:08]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/SQIsign-Fixed-Precision/build OUT=/root/sqisign-fp-bench/results_compare/klkl25/lvl1
+[klkl25/lvl1] [2026-05-21 19:52:08]       REPO=<path>/SQIsign-Fixed-Precision BUILD=<path>/SQIsign-Fixed-Precision/build OUT=<path>/sqisign-fp-bench/results_compare/klkl25/lvl1
 [klkl25/lvl1] [2026-05-21 19:52:08]       LEVELS=lvl1  PHASES=keypair sign verify  PARALLEL=4
 [klkl25/lvl1] [2026-05-21 19:52:08]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
 [klkl25/lvl1] [2026-05-21 19:52:08]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s
@@ -183,10 +183,10 @@
 [klkl25/lvl1] [2026-05-21 20:54:38]   lvl1 / verify iter=32 core=2 dur=350s exit=124 — not counted
 [klkl25/lvl1] [2026-05-21 20:54:38] === lvl1 / verify done: 22 valid / 32 attempts (parallel N=4)
 [klkl25/lvl1] [2026-05-21 20:54:38] ###### run_until20_parallel.sh end
-[2026-05-21 20:54:38] [meta] >>> START  impl=ours  level=lvl3  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/ours/lvl3  build=/root/compact-SQIsign/build
+[2026-05-21 20:54:38] [meta] >>> START  impl=ours  level=lvl3  phases=keypair sign verify  N=4  out=<path>/sqisign-fp-bench/results_compare/ours/lvl3  build=<path>/compact-SQIsign/build
 [2026-05-21 21:58:06] [meta] <<< DONE   impl=ours  level=lvl3  rc=0
 [ours/lvl3] [2026-05-21 20:54:38] ###### run_until20_parallel.sh start
-[ours/lvl3] [2026-05-21 20:54:38]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/compact-SQIsign/build OUT=/root/sqisign-fp-bench/results_compare/ours/lvl3
+[ours/lvl3] [2026-05-21 20:54:38]       REPO=<path>/SQIsign-Fixed-Precision BUILD=<path>/compact-SQIsign/build OUT=<path>/sqisign-fp-bench/results_compare/ours/lvl3
 [ours/lvl3] [2026-05-21 20:54:38]       LEVELS=lvl3  PHASES=keypair sign verify  PARALLEL=4
 [ours/lvl3] [2026-05-21 20:54:38]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
 [ours/lvl3] [2026-05-21 20:54:38]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s
@@ -266,10 +266,10 @@
 [ours/lvl3] [2026-05-21 21:58:06]   lvl3 / verify iter=21 core=2 dur=447s exit=0 retries=0 wall=0.004416s  (valid=23/20)
 [ours/lvl3] [2026-05-21 21:58:06] === lvl3 / verify done: 23 valid / 23 attempts (parallel N=4)
 [ours/lvl3] [2026-05-21 21:58:06] ###### run_until20_parallel.sh end
-[2026-05-21 21:58:06] [meta] >>> START  impl=ours  level=lvl5  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/ours/lvl5  build=/root/compact-SQIsign/build
+[2026-05-21 21:58:06] [meta] >>> START  impl=ours  level=lvl5  phases=keypair sign verify  N=4  out=<path>/sqisign-fp-bench/results_compare/ours/lvl5  build=<path>/compact-SQIsign/build
 [2026-05-22 00:38:52] [meta] <<< DONE   impl=ours  level=lvl5  rc=0
 [ours/lvl5] [2026-05-21 21:58:06] ###### run_until20_parallel.sh start
-[ours/lvl5] [2026-05-21 21:58:06]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/compact-SQIsign/build OUT=/root/sqisign-fp-bench/results_compare/ours/lvl5
+[ours/lvl5] [2026-05-21 21:58:06]       REPO=<path>/SQIsign-Fixed-Precision BUILD=<path>/compact-SQIsign/build OUT=<path>/sqisign-fp-bench/results_compare/ours/lvl5
 [ours/lvl5] [2026-05-21 21:58:06]       LEVELS=lvl5  PHASES=keypair sign verify  PARALLEL=4
 [ours/lvl5] [2026-05-21 21:58:06]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
 [ours/lvl5] [2026-05-21 21:58:06]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s
@@ -349,10 +349,10 @@
 [ours/lvl5] [2026-05-22 00:38:52]   lvl5 / verify iter=23 core=2 dur=553s exit=0 retries=0 wall=0.008592s  (valid=23/20)
 [ours/lvl5] [2026-05-22 00:38:52] === lvl5 / verify done: 23 valid / 23 attempts (parallel N=4)
 [ours/lvl5] [2026-05-22 00:38:52] ###### run_until20_parallel.sh end
-[2026-05-22 00:38:52] [meta] >>> START  impl=klkl25  level=lvl3  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl3  build=/root/SQIsign-Fixed-Precision/build
+[2026-05-22 00:38:52] [meta] >>> START  impl=klkl25  level=lvl3  phases=keypair sign verify  N=4  out=<path>/sqisign-fp-bench/results_compare/klkl25/lvl3  build=<path>/SQIsign-Fixed-Precision/build
 [2026-05-22 05:37:34] [meta] <<< DONE   impl=klkl25  level=lvl3  rc=0
 [klkl25/lvl3] [2026-05-22 00:38:52] ###### run_until20_parallel.sh start
-[klkl25/lvl3] [2026-05-22 00:38:52]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/SQIsign-Fixed-Precision/build OUT=/root/sqisign-fp-bench/results_compare/klkl25/lvl3
+[klkl25/lvl3] [2026-05-22 00:38:52]       REPO=<path>/SQIsign-Fixed-Precision BUILD=<path>/SQIsign-Fixed-Precision/build OUT=<path>/sqisign-fp-bench/results_compare/klkl25/lvl3
 [klkl25/lvl3] [2026-05-22 00:38:52]       LEVELS=lvl3  PHASES=keypair sign verify  PARALLEL=4
 [klkl25/lvl3] [2026-05-22 00:38:52]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
 [klkl25/lvl3] [2026-05-22 00:38:52]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s
@@ -461,10 +461,10 @@
 [klkl25/lvl3] [2026-05-22 05:37:34]   lvl3 / verify iter=35 core=3 dur=1223s exit=0 retries=10 wall=0.004478s  (valid=22/20)
 [klkl25/lvl3] [2026-05-22 05:37:34] === lvl3 / verify done: 22 valid / 35 attempts (parallel N=4)
 [klkl25/lvl3] [2026-05-22 05:37:34] ###### run_until20_parallel.sh end
-[2026-05-22 05:37:34] [meta] >>> START  impl=klkl25  level=lvl5  phases=keypair sign verify  N=4  out=/root/sqisign-fp-bench/results_compare/klkl25/lvl5  build=/root/SQIsign-Fixed-Precision/build
+[2026-05-22 05:37:34] [meta] >>> START  impl=klkl25  level=lvl5  phases=keypair sign verify  N=4  out=<path>/sqisign-fp-bench/results_compare/klkl25/lvl5  build=<path>/SQIsign-Fixed-Precision/build
 [2026-05-22 09:26:24] [meta] <<< DONE   impl=klkl25  level=lvl5  rc=137
 [klkl25/lvl5] [2026-05-22 05:37:34] ###### run_until20_parallel.sh start
-[klkl25/lvl5] [2026-05-22 05:37:34]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/SQIsign-Fixed-Precision/build OUT=/root/sqisign-fp-bench/results_compare/klkl25/lvl5
+[klkl25/lvl5] [2026-05-22 05:37:34]       REPO=<path>/SQIsign-Fixed-Precision BUILD=<path>/SQIsign-Fixed-Precision/build OUT=<path>/sqisign-fp-bench/results_compare/klkl25/lvl5
 [klkl25/lvl5] [2026-05-22 05:37:34]       LEVELS=lvl5  PHASES=keypair sign verify  PARALLEL=4
 [klkl25/lvl5] [2026-05-22 05:37:34]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
 [klkl25/lvl5] [2026-05-22 05:37:34]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s

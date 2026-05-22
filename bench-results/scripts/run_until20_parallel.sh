@@ -3,9 +3,9 @@
 
 set -u
 
-REPO="${REPO:-/root/SQIsign-Fixed-Precision}"
+REPO="${REPO:-<path>/SQIsign-Fixed-Precision}"
 BUILD="${BUILD:-$REPO/build}"
-OUT="${OUT:-/root/sqisign-fp-bench/results_compare}"
+OUT="${OUT:-<path>/sqisign-fp-bench/results_compare}"
 
 TIMEOUT_LVL1="${TIMEOUT_LVL1:-350}"   # ~1.5×(parallel) × 1.2×(safety) × 184s max-observed legit DUR
 TIMEOUT_LVL3="${TIMEOUT_LVL3:-1300}"

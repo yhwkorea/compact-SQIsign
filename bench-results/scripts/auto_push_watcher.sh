@@ -7,10 +7,10 @@
 
 set -u
 
-META=/root/sqisign-fp-bench/results_compare/META.log
-RESULTS=/root/sqisign-fp-bench/results_compare
-REPO=/root/compact-SQIsign
-PUSH_LOG=/root/sqisign-fp-bench/auto_push.log
+META=<path>/sqisign-fp-bench/results_compare/META.log
+RESULTS=<path>/sqisign-fp-bench/results_compare
+REPO=<path>/compact-SQIsign
+PUSH_LOG=<path>/sqisign-fp-bench/auto_push.log
 
 : > "$PUSH_LOG"
 
@@ -41,7 +41,7 @@ while true; do
       done
 
     # Refresh STATS.md (mean/median/min/max per impl/level/phase)
-    bash /root/sqisign-fp-bench/compute_stats.sh "$RESULTS" "$REPO/bench-results/results_compare" 2>>"$PUSH_LOG"
+    bash <path>/sqisign-fp-bench/compute_stats.sh "$RESULTS" "$REPO/bench-results/results_compare" 2>>"$PUSH_LOG"
 
     git add bench-results/ 2>>"$PUSH_LOG"
     if git -c user.email=anonymous@example.com -c user.name=Anonymous \
@@ -72,7 +72,7 @@ while true; do
         awk -F'\t' 'NR>1 && $3==0 { c++; if (c<=20) print }' "$f" >> "$f.new"
         mv "$f.new" "$f"
       done
-    bash /root/sqisign-fp-bench/compute_stats.sh "$RESULTS" "$REPO/bench-results/results_compare" 2>>"$PUSH_LOG"
+    bash <path>/sqisign-fp-bench/compute_stats.sh "$RESULTS" "$REPO/bench-results/results_compare" 2>>"$PUSH_LOG"
     git add bench-results/
     git -c user.email=anonymous@example.com -c user.name=Anonymous \
         commit -m "bench-results: final dump (all blocks done)" 2>>"$PUSH_LOG" || true

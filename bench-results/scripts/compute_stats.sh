@@ -3,8 +3,8 @@
 # and write a Markdown STATS.md summary at the root of the staged bench-results dir.
 
 set -u
-RESULTS="${1:-/root/sqisign-fp-bench/results_compare}"
-OUT_DIR="${2:-/root/compact-SQIsign/bench-results/results_compare}"
+RESULTS="${1:-<path>/sqisign-fp-bench/results_compare}"
+OUT_DIR="${2:-<path>/compact-SQIsign/bench-results/results_compare}"
 OUT="$OUT_DIR/STATS.md"
 
 mkdir -p "$OUT_DIR"

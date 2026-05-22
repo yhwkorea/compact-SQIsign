@@ -34,7 +34,7 @@ SQIsign is an isogeny-based post-quantum signature scheme whose public keys and 
 % Its practical efficiency, however, relies on arithmetic in quaternion algebras over the rational field.
 % This quaternionic representation makes fixed-precision implementation difficult, since intermediate integer coefficients can grow much larger than the final cryptographic objects.
 However, since SQIsign relies on arithmetic in quaternion algebras over the rational field, there was no fixed-precision integer arithmetic of SQIsign, hindering constant-time and implementation on memory-constrained devices.
-Recent work by Kim et al. instantiated SQIsign implementation with fixed-precision integer arithmetic, by deriving uniform worst-case bounds for the quaternion algorithms used in key generation and signing.
+Recent work~\cite{KLKL25} instantiated SQIsign implementation with fixed-precision integer arithmetic, by deriving uniform worst-case bounds for the quaternion algorithms used in key generation and signing.
 Nevertheless, the resulting precision budget remains large, exceeding 13~times of the public key size.
 Hence it forces implementations to reserve wide integer buffers throughout the computation.
 This increases the memory footprint and weakens the suitability of fixed-precision SQIsign for constrained platforms.

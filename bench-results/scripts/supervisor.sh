@@ -4,17 +4,17 @@
 
 set -u
 
-META=/root/sqisign-fp-bench/run_compare.sh
-WATCHER=/root/sqisign-fp-bench/auto_push_watcher.sh
+META=<path>/sqisign-fp-bench/run_compare.sh
+WATCHER=<path>/sqisign-fp-bench/auto_push_watcher.sh
 PUSH_INTERVAL="${PUSH_INTERVAL:-1800}"   # 30 min
-SUP_LOG=/root/sqisign-fp-bench/supervisor.log
+SUP_LOG=<path>/sqisign-fp-bench/supervisor.log
 
 log() { echo "[$(date '+%F %T')] $*" >> "$SUP_LOG"; }
 
 : > "$SUP_LOG"
 log "###### supervisor start (PUSH_INTERVAL=${PUSH_INTERVAL}s)"
 
-cd /root/sqisign-fp-bench
+cd <path>/sqisign-fp-bench
 
 last_push=0
 
