@@ -563,6 +563,7 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
 {
     int ret = 0;
     int reduced_order = 0; // work around false positive gcc warning
+    int sign_retries = 0;
 
     uint_fast8_t pow_dim2_deg_resp;
     assert(SQIsign_response_length <= (intmax_t)UINT_FAST8_MAX); // otherwise we might need more bits there
@@ -597,10 +598,11 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
 
         // computing the commitment
         ret = commit(&Ecom_Eaux.E1, &Ecom_Eaux.B1, &lideal_commit);
-        printf("--commit done--\n");
+        (void)0;
 
         // start again if the commitment generation has failed
         if (!ret) {
+            sign_retries++;
             continue;
         }
 
@@ -614,9 +616,9 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
 
             // computing the challenge ideal
             compute_challenge_ideal_signature(&lideal_chall_two, sig, sk);
-            printf("--compute_challenge_ideal_signature done--\n");
+            (void)0;
             compute_response_quat_element(&resp_quat, &lattice_content, sk, &lideal_chall_two, &lideal_commit);
-            printf("--compute_response_quat_element done--\n");
+            (void)0;
 
             // Clean up
             quat_left_ideal_finalize(&lideal_chall_two);
@@ -628,9 +630,10 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
             // make_primitive's lattice-containment invariant was violated (silently
             // under NDEBUG). Retry from commit instead of spinning forever.
             ret = 0;
+            sign_retries++;
             continue;
         }
-        printf("--compute_backtracking_signature done--\n");
+        (void)0;
 
         // creating lideal_com * lideal_resp
         // we first compute the norm of lideal_resp
@@ -646,9 +649,10 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
                                                  &lideal_commit)) {
             // Norm/divisibility invariants violated under NDEBUG; retry from commit.
             ret = 0;
+            sign_retries++;
             continue;
         }
-        printf("--compute_random_aux_norm_and_helpers done--\n");
+        (void)0;
 
         // notational conventions:
         // B0 = canonical basis of E0
@@ -659,10 +663,11 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
             // Evaluate the random aux ideal on the curve E0 and its basis to find E_aux and B_aux
             ret =
                 evaluate_random_aux_isogeny_signature(&Ecom_Eaux.E2, &Ecom_Eaux.B2, &random_aux_norm, &lideal_com_resp);
-            printf("--evaluate_random_aux_isogeny_signature done--\n");
+            (void)0;
 
             // auxiliary isogeny computation failed we must start again
             if (!ret) {
+                sign_retries++;
                 continue;
             }
 
@@ -687,9 +692,11 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
             // B_chall_2 on E_chall_2
             ret = compute_dim2_isogeny_challenge(
                 &Eaux2_Echall2, &Ecom_Eaux, &degree_resp_inv, pow_dim2_deg_resp, sig->two_resp_length, reduced_order);
-            printf("--compute_dim2_isogeny_challenge done--\n");
-            if (!ret)
+            (void)0;
+            if (!ret) {
+                sign_retries++;
                 continue;
+            }
         } else {
             // No 2d isogeny needed, so simulate a "Kani matrix" identity here
             copy_curve(&Eaux2_Echall2.E1, &Ecom_Eaux.E1);
@@ -720,7 +727,7 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
     // Set the basis change matrix from canonical bases to the supplied bases
     compute_and_set_basis_change_matrix(
         sig, &Eaux2_Echall2.B1, &Eaux2_Echall2.B2, &Eaux2_Echall2.E1, &E_chall, reduced_order);
-    printf("--compute_and_set_basis_change_matrix done--\n");
+    (void)0;
 
     quat_alg_elem_finalize(&resp_quat);
     quat_left_ideal_finalize(&lideal_commit);
@@ -730,6 +737,8 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
     ibz_finalize(&remain);
     ibz_finalize(&degree_resp_inv);
     ibz_finalize(&random_aux_norm);
+
+    fprintf(stderr, "[SIGN_RETRIES] %d\n", sign_retries);
 
     return ret;
 }

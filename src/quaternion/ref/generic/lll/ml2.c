@@ -280,7 +280,7 @@ ml2_main_loop(ml2_state_t *st)
     dpe_set_z(st->r[0][0], &st->G[0][0]);
     int kappa = 1;
     int outer_iter = 0;
-    /* paper Issue 13 (author reply): "size-reduce하면 entry 증가 X, size 단조 감소".
+    /* paper Issue 13 (author reply): "size-reduce keeps entry count unchanged and size monotonically non-increasing".
      * Paper ML2 (NS09 Fig 9) does not have abort/oscillation detection — convergence
      * guaranteed by Lemma lazy-size-reduction-bound + size-monotonic invariant.
      * Set OUTER_MAX large enough that termination is dominated by paper's convergence

@@ -340,7 +340,7 @@ ibz_sub(ibz_t *diff, const ibz_t *a, const ibz_t *b)
 void
 ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b)
 {
-    // alias-safe (prod==a or prod==b 대응)
+    // alias-safe (handles prod==a or prod==b)
     ibz_t a_in, b_in;
     const ibz_t *A = a, *B = b;
     if (prod == a) { ibz_copy(&a_in, a); A = &a_in; }
@@ -441,7 +441,7 @@ ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b)
 void
 ibz_mul_2exp(ibz_t *result, const ibz_t *a, size_t shift)
 {
-    // in-place 호출 대비: result == a 이면 따로 복사해서 사용
+    // guard for in-place call: copy first if result == a
     ibz_t a_copy;
     const ibz_t *src = a;
 
@@ -461,12 +461,12 @@ ibz_mul_2exp(ibz_t *result, const ibz_t *a, size_t shift)
     ibz_init(result);
 
     if (limb_shift >= IBZ_LIMBS) {
-        // 전체 범위를 벗어나면 그냥 0
+        // out of range -> just zero
         return;
     }
 
     if (bit_shift == 0) {
-        // limb 단위 shift
+        // limb-level shift
         for (size_t i = 0; i < IBZ_LIMBS - limb_shift; i++) {
             (*result)[i + limb_shift] = (*src)[i];
         }
@@ -654,7 +654,7 @@ ibz_convert_to_str(const ibz_t *i, char *str, int base)
         ibz_t q_next;
         ibz_div(&q_next, &r, &q, &base_ibz);   // q_next = q / base, r = q % base
 
-        // 나머지가 혹시라도 base 이상이거나 이상한 값이면 방어
+        // defense in case remainder >= base or other anomalous value
         uint64_t limb0 = r[0];
         int digit = (int)(limb0 % (uint64_t)base);
 
@@ -1004,7 +1004,7 @@ ibz_div(ibz_t *quotient, ibz_t *remainder, const ibz_t *a, const ibz_t *b)
     ibz_abs(&dividend, a);
     ibz_abs(&divisor,  b);
 
-    // |a| < |b| 인 경우: 몫=0, 나머지=a 그대로
+    // |a| < |b|: quotient=0, remainder=a unchanged
     if (ibz_cmp(&dividend, &divisor) < 0) {
         if (quotient)  ibz_init(quotient);
         if (remainder) ibz_copy(remainder, a);
@@ -1021,7 +1021,7 @@ ibz_div(ibz_t *quotient, ibz_t *remainder, const ibz_t *a, const ibz_t *b)
     ibz_t shifted_divisor;
     ibz_mul_2exp(&shifted_divisor, &divisor, shift);
 
-    // 메인 division 루프
+    // main division loop
     for (int i = shift; i >= 0; i--) {
         if (ibz_cmp(&r, &shifted_divisor) >= 0) {
             ibz_sub(&r, &r, &shifted_divisor);
@@ -1032,7 +1032,7 @@ ibz_div(ibz_t *quotient, ibz_t *remainder, const ibz_t *a, const ibz_t *b)
         }
     }
 
-    // 부호 조정
+    // sign adjustment
     if (quot_neg && !ibz_is_zero(&q)) {
         ibz_neg(&q, &q);
     }
@@ -1040,7 +1040,7 @@ ibz_div(ibz_t *quotient, ibz_t *remainder, const ibz_t *a, const ibz_t *b)
         ibz_neg(&r, &r);
     }
 
-    // 마지막에만 결과 내보내기 (alias-safe)
+    // emit the result only at the end (alias-safe)
     if (quotient)  ibz_copy(quotient,  &q);
     if (remainder) ibz_copy(remainder, &r);
 }
@@ -1240,7 +1240,7 @@ void
 ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y,
            const ibz_t *a, const ibz_t *b)
 {
-    // 특수 케이스: a == 0
+    // special case: a == 0
     if (ibz_is_zero(a)) {
         ibz_abs(gcd, b);
         ibz_set(x, 0);
@@ -1252,7 +1252,7 @@ ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y,
         return;
     }
 
-    // 특수 케이스: b == 0
+    // special case: b == 0
     if (ibz_is_zero(b)) {
         ibz_abs(gcd, a);
         if (ibz_is_negative(a)) {
@@ -1269,7 +1269,7 @@ ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y,
     ibz_t q, r;
     ibz_t tmp1, tmp2;
 
-    // a, b 는 나중에 다시 써야 할 수 있으니 로컬에 복사
+    // copy a, b locally since they may be reused later
     ibz_copy(&aa, a);
     ibz_copy(&bb, b);
 
@@ -1279,9 +1279,9 @@ ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y,
     ibz_set(&x1, 0);
     ibz_set(&y1, 1);
 
-    // 표준 확장 유클리드 알고리즘
+    // standard extended Euclidean algorithm
     while (!ibz_is_zero(&bb)) {
-        // aa = q * bb + r  (ibz_div: aa, bb의 부호에 맞는 q, r)
+        // aa = q * bb + r  (ibz_div: q, r with signs matching aa, bb)
         ibz_div(&q, &r, &aa, &bb);
 
         // (aa, bb) <- (bb, r)
@@ -1301,12 +1301,12 @@ ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y,
         ibz_copy(&y1, &tmp2);
     }
 
-    // 이제 aa 가 gcd(a,b) (부호 포함)
+    // now aa == gcd(a, b) (signed)
     ibz_copy(gcd, &aa);
     ibz_copy(x, &x0);
     ibz_copy(y, &y0);
 
-    // gcd 를 양수로 정규화: gcd < 0 이면 gcd,x,y 모두 부호 반전
+    // normalize gcd to positive: if gcd < 0 flip the sign of gcd, x, y
     if (ibz_is_negative(gcd)) {
         ibz_neg(gcd, gcd);
         ibz_neg(x, x);

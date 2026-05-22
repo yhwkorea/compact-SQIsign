@@ -311,7 +311,7 @@ quat_lattice_mul(quat_lattice_t *res,
     // ibz_mul(&t2, norm2, norm2);   // t2 = norm2^2
     // ibz_mul(&hnfmod, &t1, &t2);   // hnfmod = norm1^2 * norm2^2
 
-    // // hnfmod > 0 확인 (디버깅용, 나중에 지워도 됨)
+    // // verify hnfmod > 0 (debug, may remove later)
     // assert(ibz_cmp(&hnfmod, &ibz_const_zero) > 0);
 
     // ibz_finalize(&t1);

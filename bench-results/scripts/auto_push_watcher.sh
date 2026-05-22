@@ -44,7 +44,7 @@ while true; do
     bash /root/sqisign-fp-bench/compute_stats.sh "$RESULTS" "$REPO/bench-results/results_compare" 2>>"$PUSH_LOG"
 
     git add bench-results/ 2>>"$PUSH_LOG"
-    if git -c user.email=htelro02@gmail.com -c user.name=Hyunwoo \
+    if git -c user.email=anonymous@example.com -c user.name=Anonymous \
          commit -m "bench-results: $(echo "$block_line" | sed 's/.*<<< DONE //')" \
          2>>"$PUSH_LOG"; then
       timeout 180 git push origin main 2>>"$PUSH_LOG" \
@@ -74,7 +74,7 @@ while true; do
       done
     bash /root/sqisign-fp-bench/compute_stats.sh "$RESULTS" "$REPO/bench-results/results_compare" 2>>"$PUSH_LOG"
     git add bench-results/
-    git -c user.email=htelro02@gmail.com -c user.name=Hyunwoo \
+    git -c user.email=anonymous@example.com -c user.name=Anonymous \
         commit -m "bench-results: final dump (all blocks done)" 2>>"$PUSH_LOG" || true
     timeout 180 git push origin main 2>>"$PUSH_LOG" || log "final push FAIL"
     log "###### auto_push_watcher exit"

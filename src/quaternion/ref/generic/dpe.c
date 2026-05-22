@@ -21,9 +21,9 @@ void dpe_get_z(ibz_t *x, const dpe_t y)
         return;
     }
 
-    // ey >= DPE_BITSIZE => y는 정수(ULP>=1)
+    // ey >= DPE_BITSIZE => y is an integer (ULP >= 1)
     if (ey >= DPE_BITSIZE) {
-        // mant * 2^DPE_BITSIZE 는 (이상적으로) 정수
+        // mant * 2^DPE_BITSIZE is (ideally) an integer
         double d = (double)(DPE_MANT(y) * DPE_2_POW_BITSIZE);
         uint64_t w = (uint64_t) llround(fabs(d));  // 0 <= w < 2^53
 
@@ -45,7 +45,7 @@ void dpe_get_z(ibz_t *x, const dpe_t y)
         return;
     }
 
-    // 그 외: ldexp 후 반올림 (결과는 <= 2^53 범위)
+    // otherwise: ldexp then round (result fits within 2^53)
     double d = (double) DPE_LDEXP(DPE_MANT(y), ey);
     long long v = llround(d);
     ibz_set_si64(x, (int64_t)v);
@@ -73,7 +73,7 @@ void dpe_set_z(dpe_t x, const ibz_t *y)
     ibz_init(&top);
     ibz_div_2exp(&top, &a, (uint32_t)shift);
 
-    uint64_t hi = top[0];         // top < 2^53 보장
+    uint64_t hi = top[0];         // top < 2^53 guaranteed
     double mant = (double)hi / ldexp(1.0, k);  // in [0.5,1)
     if (neg) mant = -mant;
 

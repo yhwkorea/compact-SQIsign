@@ -205,7 +205,7 @@ quat_lll_gram_schmidt_transposed_with_ibq(ibq_mat_4x4_t *orthogonalised_transpos
 //     quat_lll_gram_schmidt_transposed_with_ibq(&orthogonalised_transposed, mat, &(alg->p));
 
 //     /********************************************************************
-//      * 1. 사이즈 리덕션 조건: |mu_{i,j}| <= eta  인지 체크
+//      * 1. check size-reduction condition: |mu_{i,j}| <= eta
 //      ********************************************************************/
 //     for (int i = 0; i < 4; i++) {
 //         for (int j = 0; j < i; j++) {
@@ -225,10 +225,10 @@ quat_lll_gram_schmidt_transposed_with_ibq(ibq_mat_4x4_t *orthogonalised_transpos
 //             ibq_abs(&mu, &mu);        // |mu|
 
 //             if (ibq_cmp(&mu, eta) > 0) {
-//                 // 여기서 사이즈 리덕션 조건이 깨짐
+//                 // size-reduction condition violated here
 //                 printf("[LLL verify] size-reduction FAIL at (i=%d, j=%d)\n", i, j);
-//                 // 여기에 ibq/ibz 출력 함수가 있다면 같이 찍어준다.
-//                 // 예: ibq_print가 있다면
+//                 // if an ibq/ibz print helper exists, dump here too.
+//                 // e.g. ibq_print if it exists
 //                 // ibq_print("  |mu|  = ", &mu);
 //                 // ibq_print("  eta  = ", eta);
 
@@ -238,7 +238,7 @@ quat_lll_gram_schmidt_transposed_with_ibq(ibq_mat_4x4_t *orthogonalised_transpos
 //     }
 
 //     /********************************************************************
-//      * 2. Lovász 조건: 
+//      * 2. Lovasz condition:
 //      *    ||b_i^*||^2 >= (delta - mu^2) * ||b_{i-1}^*||^2
 //      ********************************************************************/
 //     for (int i = 1; i < 4; i++) {
@@ -268,9 +268,9 @@ quat_lll_gram_schmidt_transposed_with_ibq(ibq_mat_4x4_t *orthogonalised_transpos
 //         ibq_mul(&div, &norm, &mu);
 
 //         if (ibq_cmp(&tmp, &div) < 0) {
-//             // 여기서 Lovász 조건이 깨짐
+//             // Lovasz condition violated here
 //             printf("[LLL verify] Lovasz FAIL at i=%d\n", i);
-//             // 있으면 찍어보기
+//             // dump if available
 //             // ibq_print("  ||b_i^*||^2            = ", &tmp);
 //             // ibq_print("  (delta - mu^2)||b_{i-1}^*||^2 = ", &div);
 //             // ibq_print("  delta = ", delta);
@@ -382,12 +382,12 @@ quat_lll_verify(const ibz_mat_4x4_t *mat,
     quat_lll_gram_schmidt_transposed_with_ibq(&orthogonalised_transposed,
                                               mat, &(alg->p));
 
-    /* 필요하면 전체 직교화 행렬을 한 번 찍어볼 수도 있음 */
+    /* optionally print the full Gram-Schmidt matrix */
     // printf("=== GS-transposed ===\n");
     // ibq_mat_4x4_print(&orthogonalised_transposed);
 
     /********************************************************************
-     * 1. size reduction 조건: |mu_{i,j}| <= eta
+     * 1. size-reduction condition: |mu_{i,j}| <= eta
      ********************************************************************/
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < i; j++) {
@@ -418,7 +418,7 @@ quat_lll_verify(const ibz_mat_4x4_t *mat,
     }
 
     /********************************************************************
-     * 2. Lovász 조건: ||b_i^*||^2 >= (delta - mu^2) * ||b_{i-1}^*||^2
+     * 2. Lovasz condition: ||b_i^*||^2 >= (delta - mu^2) * ||b_{i-1}^*||^2
      ********************************************************************/
     for (int i = 1; i < 4; i++) {
         ibq_vec_4_copy_ibz(&tmp_vec,
