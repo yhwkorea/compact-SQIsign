@@ -1,5 +1,5 @@
 [2026-05-21 20:54:38] ###### run_until20_parallel.sh start
-[2026-05-21 20:54:38]       REPO=<path>/SQIsign-Fixed-Precision BUILD=<path>/compact-SQIsign/build OUT=<path>/sqisign-fp-bench/results_compare/ours/lvl3
+[2026-05-21 20:54:38]       REPO=/root/SQIsign-Fixed-Precision BUILD=/root/compact-SQIsign/build OUT=/root/sqisign-fp-bench/results_compare/ours/lvl3
 [2026-05-21 20:54:38]       LEVELS=lvl3  PHASES=keypair sign verify  PARALLEL=4
 [2026-05-21 20:54:38]       VALID_TARGET=20  HARD_ATTEMPT_CAP=300
 [2026-05-21 20:54:38]       timeouts: lvl1=350s lvl3=1300s lvl5=2600s

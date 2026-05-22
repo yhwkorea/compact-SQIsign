@@ -21,6 +21,7 @@ exit=0 (valid) attempts; `mean`/`median`/`min`/`max` are over those.
 | klkl25 | lvl3 | sign | 21 | 401.182669 | 370.077750 | 89.947025 | 778.157357 |
 | klkl25 | lvl3 | verify | 22 | 0.006286 | 0.004773 | 0.004478 | 0.009098 |
 | klkl25 | lvl5 | keypair | 0 | - | - | - | - |
+| klkl25 | lvl5 | verify | 20 | 0.009575 | 0.009396 | 0.009211 | 0.010516 |
 
 ## Side-by-side (per level, KeyGen / Sign / Verify; wall-clock seconds)
 
@@ -45,6 +46,6 @@ exit=0 (valid) attempts; `mean`/`median`/`min`/`max` are over those.
 
 | Implementation | KeyGen mean | KeyGen median | Sign mean | Sign median | Verify mean | Verify median |
 | -------------- | ----------: | ------------: | --------: | ----------: | ----------: | ------------: |
-| KLKL25 | — (n=0) | — | — (n=0) | — | — (n=0) | — |
+| KLKL25 | — (n=0) | — | — (n=0) | — | 0.009575 (n=20) | 0.009396 |
 | Ours | 227.923443 (n=23) | 171.830075 | 478.813548 (n=23) | 412.870057 | 0.011545 (n=23) | 0.009091 |
-| **Ours speedup (median)** | — | | — | | — | |
+| **Ours speedup (median)** | — | | — | | 1.03x | |
