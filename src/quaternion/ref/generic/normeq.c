@@ -316,7 +316,7 @@ quat_represent_integer(quat_alg_elem_t *gamma,
     return found;
 }
 
-int
+quat_random_ideal_status_t
 quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
                                          const ibz_t *norm,
                                          int is_prime,
@@ -435,15 +435,22 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
     // paper Issue 9: norm = caller-supplied N (RandomIdealGivenPrimeNorm
     // guarantees nrd(ideal) = N via Lemma nrd-mod). Skip quat_alg_norm(gen)
     // which produces a ~2*N + p_bits transient (~1275 bit at lvl1 commit).
-    quat_lideal_create_with_norm(lideal, &gen, norm, &((params->order)->order), (params->algebra));
-    assert(ibz_cmp(norm, &(lideal->norm)) == 0);
+    quat_random_ideal_status_t status = QUAT_RANDOM_IDEAL_RETRY;
+    if (found) {
+        status = quat_lideal_create_with_norm(
+                     lideal, &gen, norm, &((params->order)->order), (params->algebra))
+                     ? QUAT_RANDOM_IDEAL_SUCCESS
+                     : QUAT_RANDOM_IDEAL_FATAL;
+    }
+    assert(status != QUAT_RANDOM_IDEAL_SUCCESS ||
+           ibz_cmp(norm, &(lideal->norm)) == 0);
 
     ibz_finalize(&n_temp);
     quat_alg_elem_finalize(&gen);
     quat_alg_elem_finalize(&gen_rerand);
     ibz_finalize(&norm_d);
     ibz_finalize(&disc);
-    return (found);
+    return status;
 }
 
 void

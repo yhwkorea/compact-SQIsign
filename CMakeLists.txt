@@ -11,9 +11,20 @@ include(CTest)
 
 option(ENABLE_STRICT "Build with strict compile options." ON)
 option(ENABLE_TESTS  "Enable compilation of tests." ON)
+option(ENABLE_KAT_TESTS "Enable stored-vector regression tests (not correctness tests)." OFF)
+option(ENABLE_ML2_PROFILE "Collect opt-in ML2 retry statistics in test binaries." OFF)
+option(ENABLE_INTBIG_OVERFLOW_CHECK "Abort when fixed-width signed add/sub/mul overflows." OFF)
 option(ENABLE_CT_TESTING  "Enable compilation for constant time testing." OFF)
 option(ENABLE_SIGN "Build with sign functionality" ON)
 option(ENABLE_GMP "Enable GMP library (not needed for fixed-precision implementation)" OFF)
+
+if(ENABLE_ML2_PROFILE)
+    add_compile_definitions(SQISIGN_ML2_PROFILE)
+endif()
+
+if(ENABLE_INTBIG_OVERFLOW_CHECK)
+    add_compile_definitions(SQISIGN_INTBIG_OVERFLOW_CHECK)
+endif()
 set(GMP_LIBRARY "SYSTEM" CACHE STRING "Which version of GMP to use: SYSTEM, BUILD or MINI")
 set(GF_RADIX "AUTO" CACHE STRING "Set the radix for the gf module (currently supported values: 32 or 64), or AUTO.")
 

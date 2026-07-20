@@ -24,6 +24,10 @@
 #include "internal.h"
 #include "dpe.h"
 
+#if defined(SQISIGN_ML2_PROFILE)
+#include <stdatomic.h>
+#endif
+
 #ifndef ML2_MAX_D
 /* d=16 needed for paper Issue 11/12 spec-faithful quat_lideal_lideal_mul_reduced:
  * the bar(J_t)·I product yields 16 column generators that we LLL directly
@@ -229,6 +233,12 @@ ml2_lazy_size_reduce(ml2_state_t *st, int kappa)
         }
     }
 
+    /* The paper algorithm has no cap, but a fixed-precision implementation
+     * must not publish a partially size-reduced basis if its safeguard is
+     * reached.  Mark the attempt as failed so the wrapper can retry ML2 with
+     * another span-preserving generator order. */
+    st->aborted = 1;
+
 done:
     dpe_clear(tmp_f);
     dpe_clear(X_f);
@@ -300,6 +310,8 @@ ml2_main_loop(ml2_state_t *st)
         }
 
         ml2_lazy_size_reduce(st, kappa);
+        if (st->aborted)
+            break;
 
         int kappa_prime = kappa;
         while (kappa >= st->zeta + 1) {
@@ -346,6 +358,26 @@ ml2_main_loop(ml2_state_t *st)
     dpe_clear(delta_r);
 }
 
+/* Lemma 8 bounds every exact ML2 integer by max_i ||b_i||^2.  For four
+ * coordinates of at most `max_bits`, a conservative bit bound is
+ * 2*max_bits+2.  Refuse the call before forming G if that value does not fit
+ * in the signed fixed-width representation.  Permuting generators cannot
+ * change this condition, so retrying an unsafe input would only repeat an
+ * overflowing computation. */
+static int
+ml2_input_fits_precision(const ibz_vec_4_t *input, int d)
+{
+    int max_bits = 0;
+    for (int i = 0; i < d; i++) {
+        for (int coordinate = 0; coordinate < 4; coordinate++) {
+            int bits = ibz_bitsize(&input[i][coordinate]);
+            if (bits > max_bits)
+                max_bits = bits;
+        }
+    }
+    return 2 * max_bits + 2 <= IBZ_BITS - 1;
+}
+
 /* ========== entry point ==========
  * Reduce d input generators. On return, the LLL-reduced basis is in
  * st.b[zeta..d-1] (rank = d - zeta). Copies up to `out_capacity` of those
@@ -359,6 +391,10 @@ quat_ml2(ibz_vec_4_t *output,
          const quat_alg_t *alg)
 {
     (void)alg;
+    if (input == NULL || (out_capacity > 0 && output == NULL) ||
+        d < 1 || d > ML2_MAX_D || out_capacity < 0)
+        return -1;
+
     static int _ml2_n = 0;
     int N = _ml2_n++;
     int trace = (N < 3);
@@ -369,9 +405,10 @@ quat_ml2(ibz_vec_4_t *output,
             (unsigned long)input[0][2][0], (unsigned long)input[0][3][0]);
         fflush(stderr);
     }
-    if (d < 1 || d > ML2_MAX_D || out_capacity < 0) {
-        if (trace) fprintf(stderr, "[ML2 #%d] ARG ERROR\n", N);
-        return -1;
+    if (!ml2_input_fits_precision(input, d)) {
+        if (trace)
+            fprintf(stderr, "[ML2 #%d] PRECISION REJECT\n", N);
+        return QUAT_ML2_ERR_PRECISION;
     }
 
     ml2_state_t st;
@@ -451,4 +488,200 @@ quat_ml2(ibz_vec_4_t *output,
     ml2_state_finalize(&st);
     if (trace) { fprintf(stderr, "[ML2 #%d] exit rho=%d copied n=%d\n", N, rho, n); fflush(stderr); }
     return rho;
+}
+
+/* Return the source position for one of the retry permutations. Generator
+ * coordinates are copied verbatim: there are no sign changes or arithmetic
+ * operations, so retries cannot increase the fixed-precision bit budget. */
+static int
+ml2_retry_source_index(int attempt, int position, int d)
+{
+    switch (attempt) {
+    case 1: /* one-step cyclic rotation */
+        return (position + 1) % d;
+    case 2: /* reverse order */
+        return d - 1 - position;
+    case 3: { /* even positions, followed by odd positions */
+        int even_count = (d + 1) / 2;
+        if (position < even_count)
+            return 2 * position;
+        return 2 * (position - even_count) + 1;
+    }
+    default:
+        return position;
+    }
+}
+
+#if defined(SQISIGN_ML2_PROFILE)
+typedef struct {
+    atomic_uint_fast64_t inputs;
+    atomic_uint_fast64_t precision_rejected;
+    atomic_uint_fast64_t first_attempt_failures;
+    atomic_uint_fast64_t recovered[QUAT_ML2_RETRY_MAX_ATTEMPTS - 1];
+    atomic_uint_fast64_t exhausted;
+    atomic_uint_fast64_t underlying_attempts;
+} ml2_atomic_profile_dimension_t;
+
+static struct {
+    ml2_atomic_profile_dimension_t d4;
+    ml2_atomic_profile_dimension_t d8;
+    ml2_atomic_profile_dimension_t d16;
+} ml2_profile;
+
+static ml2_atomic_profile_dimension_t *
+ml2_profile_for_dimension(int d)
+{
+    if (d == 4)
+        return &ml2_profile.d4;
+    if (d == 8)
+        return &ml2_profile.d8;
+    if (d == 16)
+        return &ml2_profile.d16;
+    return NULL;
+}
+
+static void
+ml2_profile_dimension_reset(ml2_atomic_profile_dimension_t *dimension)
+{
+    atomic_store(&dimension->inputs, 0);
+    atomic_store(&dimension->precision_rejected, 0);
+    atomic_store(&dimension->first_attempt_failures, 0);
+    for (int i = 0; i < QUAT_ML2_RETRY_MAX_ATTEMPTS - 1; i++)
+        atomic_store(&dimension->recovered[i], 0);
+    atomic_store(&dimension->exhausted, 0);
+    atomic_store(&dimension->underlying_attempts, 0);
+}
+
+static void
+ml2_profile_dimension_get(quat_ml2_profile_dimension_t *output,
+                          const ml2_atomic_profile_dimension_t *dimension)
+{
+    output->inputs = atomic_load(&dimension->inputs);
+    output->precision_rejected = atomic_load(&dimension->precision_rejected);
+    output->first_attempt_failures = atomic_load(&dimension->first_attempt_failures);
+    for (int i = 0; i < QUAT_ML2_RETRY_MAX_ATTEMPTS - 1; i++)
+        output->recovered[i] = atomic_load(&dimension->recovered[i]);
+    output->exhausted = atomic_load(&dimension->exhausted);
+    output->underlying_attempts = atomic_load(&dimension->underlying_attempts);
+}
+
+void
+quat_ml2_profile_reset(void)
+{
+    ml2_profile_dimension_reset(&ml2_profile.d4);
+    ml2_profile_dimension_reset(&ml2_profile.d8);
+    ml2_profile_dimension_reset(&ml2_profile.d16);
+}
+
+void
+quat_ml2_profile_get(quat_ml2_profile_t *output)
+{
+    if (output == NULL)
+        return;
+    ml2_profile_dimension_get(&output->d4, &ml2_profile.d4);
+    ml2_profile_dimension_get(&output->d8, &ml2_profile.d8);
+    ml2_profile_dimension_get(&output->d16, &ml2_profile.d16);
+}
+#endif
+
+int
+quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
+                            int out_capacity,
+                            const ibz_vec_4_t *input,
+                            int d,
+                            const quat_alg_t *alg,
+                            quat_ml2_reducer_t reducer)
+{
+    ibz_vec_4_t permuted[ML2_MAX_D];
+    ibz_vec_4_t scratch[4];
+    int first_rho = -1;
+    int result = -1;
+#if defined(SQISIGN_ML2_PROFILE)
+    ml2_atomic_profile_dimension_t *profile_dimension;
+#endif
+
+    if (output == NULL || input == NULL || reducer == NULL ||
+        d < 1 || d > ML2_MAX_D || out_capacity < 4)
+        return -1;
+
+#if defined(SQISIGN_ML2_PROFILE)
+    profile_dimension = ml2_profile_for_dimension(d);
+    if (profile_dimension != NULL)
+        atomic_fetch_add(&profile_dimension->inputs, 1);
+#endif
+
+    if (!ml2_input_fits_precision(input, d)) {
+#if defined(SQISIGN_ML2_PROFILE)
+        if (profile_dimension != NULL)
+            atomic_fetch_add(&profile_dimension->precision_rejected, 1);
+#endif
+        return QUAT_ML2_ERR_PRECISION;
+    }
+
+    for (int i = 0; i < d; i++)
+        ibz_vec_4_init(&permuted[i]);
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_init(&scratch[i]);
+
+    for (int attempt = 0; attempt < QUAT_ML2_RETRY_MAX_ATTEMPTS; attempt++) {
+        const ibz_vec_4_t *attempt_input = input;
+
+        if (attempt != 0) {
+            for (int i = 0; i < d; i++) {
+                int source = ml2_retry_source_index(attempt, i, d);
+                for (int c = 0; c < 4; c++)
+                    ibz_copy(&permuted[i][c], &input[source][c]);
+            }
+            attempt_input = permuted;
+        }
+
+        int rho;
+#if defined(SQISIGN_ML2_PROFILE)
+        if (profile_dimension != NULL)
+            atomic_fetch_add(&profile_dimension->underlying_attempts, 1);
+#endif
+        rho = reducer(scratch, 4, attempt_input, d, alg);
+        if (attempt == 0)
+            first_rho = rho;
+
+        if (rho == 4) {
+            for (int i = 0; i < 4; i++)
+                for (int c = 0; c < 4; c++)
+                    ibz_copy(&output[i][c], &scratch[i][c]);
+            result = 4;
+#if defined(SQISIGN_ML2_PROFILE)
+            if (profile_dimension != NULL && attempt > 0)
+                atomic_fetch_add(&profile_dimension->recovered[attempt - 1], 1);
+#endif
+            break;
+        }
+#if defined(SQISIGN_ML2_PROFILE)
+        if (profile_dimension != NULL && attempt == 0)
+            atomic_fetch_add(&profile_dimension->first_attempt_failures, 1);
+#endif
+    }
+
+    if (result != 4) {
+        result = first_rho;
+#if defined(SQISIGN_ML2_PROFILE)
+        if (profile_dimension != NULL)
+            atomic_fetch_add(&profile_dimension->exhausted, 1);
+#endif
+    }
+
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_finalize(&scratch[i]);
+    for (int i = 0; i < d; i++)
+        ibz_vec_4_finalize(&permuted[i]);
+    return result;
+}
+
+int
+quat_ml2_retry(ibz_vec_4_t *output,
+               int out_capacity,
+               const ibz_vec_4_t *input,
+               int d,
+               const quat_alg_t *alg)
+{
+    return quat_ml2_retry_with_reducer(output, out_capacity, input, d, alg, quat_ml2);
 }

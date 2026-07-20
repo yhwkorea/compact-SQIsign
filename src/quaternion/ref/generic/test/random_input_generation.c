@@ -33,7 +33,10 @@ quat_test_input_random_ideal_generation(quat_left_ideal_t *ideals,
         }
         ibz_abs(&norm, &norm);
         // compute ideal
-        randret = !quat_sampling_random_ideal_O0_given_norm(&(ideals[iter]), &norm, 0, params, &cofactor);
+        quat_random_ideal_status_t sampling_status =
+            quat_sampling_random_ideal_O0_given_norm(
+                &(ideals[iter]), &norm, 0, params, &cofactor);
+        randret = sampling_status != QUAT_RANDOM_IDEAL_SUCCESS;
         if (randret != 0) {
             printf("Random generation failed in quat_test_input_random_ideal_generation\n");
             goto fin;

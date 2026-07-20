@@ -11,17 +11,21 @@ SQISIGN_API
 int
 sqisign_keypair(unsigned char *pk, unsigned char *sk)
 {
-    int ret = 0;
     secret_key_t skt;
     public_key_t pkt = { 0 };
     secret_key_init(&skt);
 
-    ret = !protocols_keygen(&pkt, &skt);
+    if (!protocols_keygen(&pkt, &skt)) {
+        memset(pk, 0, PUBLICKEY_BYTES);
+        memset(sk, 0, SECRETKEY_BYTES);
+        secret_key_finalize(&skt);
+        return 1;
+    }
 
     secret_key_to_bytes(sk, &skt, &pkt);
     public_key_to_bytes(pk, &pkt);
     secret_key_finalize(&skt);
-    return ret;
+    return 0;
 }
 
 SQISIGN_API
@@ -37,7 +41,11 @@ sqisign_sign(unsigned char *sm,
     public_key_t pkt = { 0 };
     signature_t sigt;
     secret_key_init(&skt);
-    secret_key_from_bytes(&skt, &pkt, sk);
+    if (!secret_key_from_bytes(&skt, &pkt, sk)) {
+        *smlen = 0;
+        secret_key_finalize(&skt);
+        return 1;
+    }
 
     memmove(sm + SIGNATURE_BYTES, m, mlen);
 
@@ -68,6 +76,12 @@ sqisign_open(unsigned char *m,
     public_key_t pkt = { 0 };
     signature_t sigt;
 
+    if (smlen < SIGNATURE_BYTES) {
+        *mlen = 0;
+        memset(m, 0, smlen);
+        return 1;
+    }
+
     public_key_from_bytes(&pkt, pk);
     signature_from_bytes(&sigt, sm);
 
@@ -92,10 +106,13 @@ sqisign_verify(const unsigned char *m,
                unsigned long long siglen,
                const unsigned char *pk)
 {
-
     int ret = 0;
     public_key_t pkt = { 0 };
     signature_t sigt;
+
+    if (siglen != SIGNATURE_BYTES) {
+        return 1;
+    }
 
     public_key_from_bytes(&pkt, pk);
     signature_from_bytes(&sigt, sig);

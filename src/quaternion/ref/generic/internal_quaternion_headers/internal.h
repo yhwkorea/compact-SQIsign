@@ -516,10 +516,11 @@ void quat_lattice_reduce_denom(quat_lattice_t *reduced,
  * @param res Output
  * @param lat1 Lattice
  * @param lat2 Lattice
+ * @returns 1 on success, 0 with res unchanged on precision/reduction failure.
  */
-void quat_lattice_add(quat_lattice_t *res,
-                      const quat_lattice_t *lat1,
-                      const quat_lattice_t *lat2); // ideal, lattice, test/lattice
+int quat_lattice_add(quat_lattice_t *res,
+                     const quat_lattice_t *lat1,
+                     const quat_lattice_t *lat2); // ideal, lattice, test/lattice
 
 /** @brief a*b for lattices
  *
@@ -527,13 +528,14 @@ void quat_lattice_add(quat_lattice_t *res,
  * @param lat1 Lattice
  * @param lat2 Lattice
  * @param alg The quaternion algebra
+ * @returns 1 on success, 0 with res unchanged on precision/reduction failure.
  */
-void quat_lattice_mul(quat_lattice_t *res,
-                      const quat_lattice_t *lat1,
-                      const quat_lattice_t *lat2,
-                      const quat_alg_t *alg,
-                      const ibz_t *norm1,
-                      const ibz_t *norm2); // ideal, lattie, test/ideal, test/lattice
+int quat_lattice_mul(quat_lattice_t *res,
+                     const quat_lattice_t *lat1,
+                     const quat_lattice_t *lat2,
+                     const quat_alg_t *alg,
+                     const ibz_t *norm1,
+                     const ibz_t *norm2); // ideal, lattie, test/ideal, test/lattice
 
 /**
  * @brief Computes the dual lattice of lat, without putting its basis in HNF
@@ -665,11 +667,12 @@ int quat_lideal_equals(const quat_left_ideal_t *lideal1,
  * @param lideal1 left ideal
  * @param lideal2 left ideal
  * @param alg the quaternion algebra
+ * @returns 1 on success, 0 with sum unchanged on reduction failure.
  */
-void quat_lideal_add(quat_left_ideal_t *sum,
-                     const quat_left_ideal_t *lideal1,
-                     const quat_left_ideal_t *lideal2,
-                     const quat_alg_t *alg); // Not used outside
+int quat_lideal_add(quat_left_ideal_t *sum,
+                    const quat_left_ideal_t *lideal1,
+                    const quat_left_ideal_t *lideal2,
+                    const quat_alg_t *alg); // Not used outside
 
 /**
  * @brief  Left ideal product of left ideal I and element alpha
@@ -715,10 +718,10 @@ void quat_lideal_inverse_lattice_without_hnf(quat_lattice_t *inv,
  * @param lideal2 Left ideal of the same maximal order than lideal1 in alg
  * @param alg The quaternion algebra
  */
-void quat_lideal_right_transporter(quat_lattice_t *trans,
-                                   const quat_left_ideal_t *lideal1,
-                                   const quat_left_ideal_t *lideal2,
-                                   const quat_alg_t *alg);
+int quat_lideal_right_transporter(quat_lattice_t *trans,
+                                  const quat_left_ideal_t *lideal1,
+                                  const quat_left_ideal_t *lideal2,
+                                  const quat_alg_t *alg);
 
 /**
  * @brief  Right order of a left ideal
@@ -727,8 +730,8 @@ void quat_lideal_right_transporter(quat_lattice_t *trans,
  * @param lideal left ideal
  * @param alg the quaternion algebra
  */
-void quat_lideal_right_order(quat_lattice_t *order, const quat_left_ideal_t *lideal,
-                             const quat_alg_t *alg); // ideal
+int quat_lideal_right_order(quat_lattice_t *order, const quat_left_ideal_t *lideal,
+                            const quat_alg_t *alg); // ideal
 
 /**
  * @brief  Gram matrix of the trace map of the ideal class

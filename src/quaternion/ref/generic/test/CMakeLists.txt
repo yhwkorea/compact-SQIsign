@@ -10,6 +10,7 @@ set(SOURCE_FILES_QUATERNION_GENERIC_REF
     finit.c
     normeq.c
     randomized.c
+    ml2_correctness.c
 )
 
 # if (NOT GMP_LIBRARY STREQUAL "MINI")
@@ -39,6 +40,10 @@ FOREACH(SVARIANT ${SVARIANT_S})
     # https://gmplib.org/list-archives/gmp-bugs/2019-March/004529.html
     if(NOT CMAKE_BUILD_TYPE STREQUAL "MSAN")
         add_test(${TEST_NAME} ${TEST_NAME})
+        set_tests_properties(${TEST_NAME}
+            PROPERTIES LABELS "correctness;quaternion")
+        # The same binary's --ml2-stress=N mode is intentionally opt-in and
+        # not registered with CTest, so large statistical samples do not slow CI.
     endif()
 ENDFOREACH()
 

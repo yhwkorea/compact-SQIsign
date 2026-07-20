@@ -5,28 +5,44 @@
 #include <torsion_constants.h>
 #include <encoded_sizes.h>
 
+typedef enum {
+    SIGNATURE_STEP_ML2_EXHAUSTED = -1,
+    SIGNATURE_STEP_RETRY = 0,
+    SIGNATURE_STEP_OK = 1,
+} signature_step_status_t;
+
 // compute the commitment with ideal to isogeny clapotis
 // and apply it to the basis of E0 (together with the multiplication by some scalar u)
-static bool
+static signature_step_status_t
 commit(ec_curve_t *E_com, ec_basis_t *basis_even_com, quat_left_ideal_t *lideal_com)
 {
-
     bool found = false;
 
     fprintf(stderr, "[COMMIT] enter, calling sampling_random_ideal\n"); fflush(stderr);
-    found = quat_sampling_random_ideal_O0_given_norm(lideal_com, &COM_DEGREE, 1, &QUAT_represent_integer_params, NULL);
+    quat_random_ideal_status_t sampling_status =
+        quat_sampling_random_ideal_O0_given_norm(
+            lideal_com, &COM_DEGREE, 1, &QUAT_represent_integer_params, NULL);
+    if (sampling_status == QUAT_RANDOM_IDEAL_FATAL)
+        return SIGNATURE_STEP_ML2_EXHAUSTED;
+    found = (sampling_status == QUAT_RANDOM_IDEAL_SUCCESS);
     fprintf(stderr, "[COMMIT] sampling done found=%d\n", found); fflush(stderr);
     // replacing it with a shorter prime norm equivalent ideal
     found = found && quat_lideal_prime_norm_reduced_equivalent(
                          lideal_com, &QUATALG_PINFTY, QUAT_primality_num_iter, QUAT_equiv_bound_coeff);
     fprintf(stderr, "[COMMIT] prime_norm_reduced_equivalent done found=%d\n", found); fflush(stderr);
     // ideal to isogeny clapotis
-    found = found && dim2id2iso_arbitrary_isogeny_evaluation(basis_even_com, E_com, lideal_com);
+    if (found) {
+        int isogeny_status =
+            dim2id2iso_arbitrary_isogeny_evaluation(basis_even_com, E_com, lideal_com);
+        if (isogeny_status == ID2ISO_STATUS_FATAL)
+            return SIGNATURE_STEP_ML2_EXHAUSTED;
+        found = (isogeny_status > 0);
+    }
     fprintf(stderr, "[COMMIT] dim2id2iso done found=%d\n", found); fflush(stderr);
-    return found;
+    return found ? SIGNATURE_STEP_OK : SIGNATURE_STEP_RETRY;
 }
 
-static void
+static int
 compute_challenge_ideal_signature(quat_left_ideal_t *lideal_chall_two, const signature_t *sig, const secret_key_t *sk)
 {
     ibz_vec_2_t vec;
@@ -45,10 +61,16 @@ compute_challenge_ideal_signature(quat_left_ideal_t *lideal_chall_two, const sig
     ibz_mat_2x2_eval(&vec, &(sk->mat_BAcan_to_BA0_two), &vec);
 
     // lideal_chall_two is the pullback of the ideal challenge through the secret key ideal
-    id2iso_kernel_dlogs_to_ideal_even(lideal_chall_two, &vec, TORSION_EVEN_POWER);
+    int ok = id2iso_kernel_dlogs_to_ideal_even(
+        lideal_chall_two, &vec, TORSION_EVEN_POWER);
+    if (!ok) {
+        ibz_vec_2_finalize(&vec);
+        return 0;
+    }
     assert(ibz_cmp(&lideal_chall_two->norm, &TORSION_PLUS_2POWER) == 0);
 
     ibz_vec_2_finalize(&vec);
+    return 1;
 }
 
 static void
@@ -66,7 +88,7 @@ sample_response(quat_alg_elem_t *x, const quat_lattice_t *lattice, const ibz_t *
     ibz_finalize(&bound);
 }
 
-static void
+static signature_step_status_t
 compute_response_quat_element(quat_alg_elem_t *resp_quat,
                               ibz_t *lattice_content,
                               const secret_key_t *sk,
@@ -75,6 +97,7 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
 {
     quat_left_ideal_t lideal_chall_secret;
     quat_lattice_t lattice_hom_chall_to_com, lat_commit;
+    signature_step_status_t status = SIGNATURE_STEP_ML2_EXHAUSTED;
 
     // Init
     quat_left_ideal_init(&lideal_chall_secret);
@@ -83,7 +106,9 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
 
     // lideal_chall_secret = lideal_secret * lideal_chall_two
     fprintf(stderr, "[RESP] enter, calling lideal_inter\n"); fflush(stderr);
-    quat_lideal_inter(&lideal_chall_secret, lideal_chall_two, &(sk->secret_ideal), &QUATALG_PINFTY);
+    if (!quat_lideal_inter(&lideal_chall_secret, lideal_chall_two, &(sk->secret_ideal), &QUATALG_PINFTY)) {
+        goto cleanup;
+    }
     fprintf(stderr, "[RESP] lideal_inter done, basis[0][0].bits=%d denom.bits=%d\n",
             ibz_bitsize(&lideal_chall_secret.lattice.basis[0][0]),
             ibz_bitsize(&lideal_chall_secret.lattice.denom)); fflush(stderr);
@@ -91,7 +116,10 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
     // now we compute lideal_com_to_chall which is dual(Icom)* lideal_chall_secret
     quat_lattice_conjugate_without_hnf(&lat_commit, &(lideal_commit->lattice));
     fprintf(stderr, "[RESP] conj done, calling intersect_mlll\n"); fflush(stderr);
-    quat_lattice_intersect_mlll(&lattice_hom_chall_to_com, &lideal_chall_secret.lattice, &lat_commit, &QUATALG_PINFTY);
+    if (!quat_lattice_intersect_mlll(
+            &lattice_hom_chall_to_com, &lideal_chall_secret.lattice, &lat_commit, &QUATALG_PINFTY)) {
+        goto cleanup;
+    }
     fprintf(stderr, "[RESP] intersect_mlll done basis[0][0].bits=%d\n",
             ibz_bitsize(&lattice_hom_chall_to_com.basis[0][0])); fflush(stderr);
 
@@ -100,11 +128,14 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
     fprintf(stderr, "[RESP] calling sample_response radius.bits=%d\n", ibz_bitsize(lattice_content)); fflush(stderr);
     sample_response(resp_quat, &lattice_hom_chall_to_com, lattice_content);
     fprintf(stderr, "[RESP] sample_response done\n"); fflush(stderr);
+    status = SIGNATURE_STEP_OK;
 
     // Clean up
+cleanup:
     quat_left_ideal_finalize(&lideal_chall_secret);
     quat_lattice_finalize(&lat_commit);
     quat_lattice_finalize(&lattice_hom_chall_to_com);
+    return status;
 }
 
 static int
@@ -152,7 +183,7 @@ compute_backtracking_signature(signature_t *sig, quat_alg_elem_t *resp_quat, ibz
     return 1;
 }
 
-static int
+static signature_step_status_t
 compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
                                     signature_t *sig,
                                     ibz_t *random_aux_norm,
@@ -165,7 +196,7 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
 {
     uint_fast8_t pow_dim2_deg_resp;
     uint_fast8_t exp_diadic_val_full_resp;
-    int ret = 0;
+    signature_step_status_t status = SIGNATURE_STEP_RETRY;
 
     ibz_t tmp, degree_full_resp, degree_odd_resp, norm_d;
 
@@ -219,7 +250,11 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
     // setting the norm
     ibz_mul(&tmp, &lideal_commit->norm, &degree_odd_resp);
     /* paper Issue 9: norm = nrd(I_com)·d_rsp known by construction (Sign Line 18) */
-    quat_lideal_create_with_norm(lideal_com_resp, resp_quat, &tmp, &MAXORD_O0, &QUATALG_PINFTY);
+    if (!quat_lideal_create_with_norm(
+            lideal_com_resp, resp_quat, &tmp, &MAXORD_O0, &QUATALG_PINFTY)) {
+        status = SIGNATURE_STEP_ML2_EXHAUSTED;
+        goto done;
+    }
 
     // now we compute the ideal_aux
     // computing the norm
@@ -235,17 +270,17 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
     ibz_invmod(degree_resp_inv, &degree_odd_resp, remain);
 
     *out_pow_dim2_deg_resp = pow_dim2_deg_resp;
-    ret = 1;
+    status = SIGNATURE_STEP_OK;
 done:
     ibz_finalize(&degree_full_resp);
     ibz_finalize(&degree_odd_resp);
     ibz_finalize(&norm_d);
     ibz_finalize(&tmp);
 
-    return ret;
+    return status;
 }
 
-static int
+static signature_step_status_t
 evaluate_random_aux_isogeny_signature(ec_curve_t *E_aux,
                                       ec_basis_t *B_aux,
                                       const ibz_t *norm,
@@ -253,6 +288,7 @@ evaluate_random_aux_isogeny_signature(ec_curve_t *E_aux,
 {
     quat_left_ideal_t lideal_aux;
     quat_left_ideal_t lideal_aux_resp_com;
+    signature_step_status_t status = SIGNATURE_STEP_RETRY;
 
     // Init
     quat_left_ideal_init(&lideal_aux);
@@ -265,35 +301,53 @@ evaluate_random_aux_isogeny_signature(ec_curve_t *E_aux,
     fflush(stderr);
 
     // sampling the ideal at random
-    int found = quat_sampling_random_ideal_O0_given_norm(
-        &lideal_aux, norm, 0, &QUAT_represent_integer_params, &QUAT_prime_cofactor);
+    quat_random_ideal_status_t sampling_status =
+        quat_sampling_random_ideal_O0_given_norm(
+            &lideal_aux, norm, 0, &QUAT_represent_integer_params, &QUAT_prime_cofactor);
+    if (sampling_status == QUAT_RANDOM_IDEAL_FATAL) {
+        status = SIGNATURE_STEP_ML2_EXHAUSTED;
+        goto cleanup;
+    }
+    int found = (sampling_status == QUAT_RANDOM_IDEAL_SUCCESS);
 
     fprintf(stderr, "[EVAL-AUX] post_sampling found=%d lideal_aux.basis_max=%d\n",
         found,
         found ? ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_aux.lattice.basis[_i][_j]); if(b>m)m=b;} m; }) : 0);
     fflush(stderr);
 
-    if (found) {
-        // pushing forward
-        quat_lideal_inter(&lideal_aux_resp_com, lideal_com_resp, &lideal_aux, &QUATALG_PINFTY);
+    if (!found)
+        goto cleanup;
 
-        fprintf(stderr, "[EVAL-AUX] post_inter basis_max=%d denom=%d\n",
-            ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_aux_resp_com.lattice.basis[_i][_j]); if(b>m)m=b;} m; }),
-            ibz_bitsize(&lideal_aux_resp_com.lattice.denom));
-        fflush(stderr);
-
-        // now we evaluate this isogeny on the basis of E0
-        found = dim2id2iso_arbitrary_isogeny_evaluation(B_aux, E_aux, &lideal_aux_resp_com);
-
-        fprintf(stderr, "[EVAL-AUX] post_dim2id2iso found=%d\n", found);
-        fflush(stderr);
-
-        // Clean up
-        quat_left_ideal_finalize(&lideal_aux_resp_com);
-        quat_left_ideal_finalize(&lideal_aux);
+    // pushing forward
+    if (!quat_lideal_inter(&lideal_aux_resp_com, lideal_com_resp, &lideal_aux, &QUATALG_PINFTY)) {
+        status = SIGNATURE_STEP_ML2_EXHAUSTED;
+        goto cleanup;
     }
 
-    return found;
+    fprintf(stderr, "[EVAL-AUX] post_inter basis_max=%d denom=%d\n",
+        ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_aux_resp_com.lattice.basis[_i][_j]); if(b>m)m=b;} m; }),
+        ibz_bitsize(&lideal_aux_resp_com.lattice.denom));
+    fflush(stderr);
+
+    // now we evaluate this isogeny on the basis of E0
+    int isogeny_status =
+        dim2id2iso_arbitrary_isogeny_evaluation(B_aux, E_aux, &lideal_aux_resp_com);
+    if (isogeny_status == ID2ISO_STATUS_FATAL) {
+        status = SIGNATURE_STEP_ML2_EXHAUSTED;
+        goto cleanup;
+    }
+    found = (isogeny_status > 0);
+
+    fprintf(stderr, "[EVAL-AUX] post_dim2id2iso found=%d\n", found);
+    fflush(stderr);
+    status = found ? SIGNATURE_STEP_OK : SIGNATURE_STEP_RETRY;
+
+    // Clean up
+cleanup:
+    quat_left_ideal_finalize(&lideal_aux_resp_com);
+    quat_left_ideal_finalize(&lideal_aux);
+
+    return status;
 }
 
 static int
@@ -402,7 +456,11 @@ compute_small_chain_isogeny_signature(ec_curve_t *E_chall_2,
 
     // we compute the generator of the challenge ideal
     /* paper Issue 9: norm = 2^length known by construction */
-    quat_lideal_create_with_norm(&lideal_resp_two, resp_quat, &two_pow, &MAXORD_O0, &QUATALG_PINFTY);
+    if (!quat_lideal_create_with_norm(
+            &lideal_resp_two, resp_quat, &two_pow, &MAXORD_O0, &QUATALG_PINFTY)) {
+        ret = 0;
+        goto cleanup;
+    }
 
     // computing the coefficients of the kernel in terms of the basis of O0
     id2iso_ideal_to_kernel_dlogs_even(&vec_resp_two, &lideal_resp_two);
@@ -431,6 +489,7 @@ compute_small_chain_isogeny_signature(ec_curve_t *E_chall_2,
     copy_point(&B_chall_2->Q, &points[1]);
     copy_point(&B_chall_2->PmQ, &points[2]);
 
+cleanup:
     ibz_finalize(&two_pow);
     ibz_vec_2_finalize(&vec_resp_two);
     quat_left_ideal_finalize(&lideal_resp_two);
@@ -597,7 +656,13 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
     while (!ret) {
 
         // computing the commitment
-        ret = commit(&Ecom_Eaux.E1, &Ecom_Eaux.B1, &lideal_commit);
+        signature_step_status_t commit_status =
+            commit(&Ecom_Eaux.E1, &Ecom_Eaux.B1, &lideal_commit);
+        if (commit_status == SIGNATURE_STEP_ML2_EXHAUSTED) {
+            ret = 0;
+            goto cleanup;
+        }
+        ret = (commit_status == SIGNATURE_STEP_OK);
         (void)0;
 
         // start again if the commitment generation has failed
@@ -615,13 +680,22 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
             quat_left_ideal_init(&lideal_chall_two);
 
             // computing the challenge ideal
-            compute_challenge_ideal_signature(&lideal_chall_two, sig, sk);
+            if (!compute_challenge_ideal_signature(&lideal_chall_two, sig, sk)) {
+                quat_left_ideal_finalize(&lideal_chall_two);
+                ret = 0;
+                goto cleanup;
+            }
             (void)0;
-            compute_response_quat_element(&resp_quat, &lattice_content, sk, &lideal_chall_two, &lideal_commit);
-            (void)0;
+            signature_step_status_t response_status =
+                compute_response_quat_element(&resp_quat, &lattice_content, sk, &lideal_chall_two, &lideal_commit);
 
             // Clean up
             quat_left_ideal_finalize(&lideal_chall_two);
+
+            if (response_status != SIGNATURE_STEP_OK) {
+                ret = 0;
+                goto cleanup;
+            }
         }
 
         // computing the amount of backtracking we're making
@@ -638,15 +712,21 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
         // creating lideal_com * lideal_resp
         // we first compute the norm of lideal_resp
         // norm of the resp_quat
-        if (!compute_random_aux_norm_and_helpers(&pow_dim2_deg_resp,
-                                                 sig,
-                                                 &random_aux_norm,
-                                                 &degree_resp_inv,
-                                                 &remain,
-                                                 &lattice_content,
-                                                 &resp_quat,
-                                                 &lideal_com_resp,
-                                                 &lideal_commit)) {
+        signature_step_status_t helper_status =
+            compute_random_aux_norm_and_helpers(&pow_dim2_deg_resp,
+                                                sig,
+                                                &random_aux_norm,
+                                                &degree_resp_inv,
+                                                &remain,
+                                                &lattice_content,
+                                                &resp_quat,
+                                                &lideal_com_resp,
+                                                &lideal_commit);
+        if (helper_status == SIGNATURE_STEP_ML2_EXHAUSTED) {
+            ret = 0;
+            goto cleanup;
+        }
+        if (helper_status != SIGNATURE_STEP_OK) {
             // Norm/divisibility invariants violated under NDEBUG; retry from commit.
             ret = 0;
             sign_retries++;
@@ -661,9 +741,15 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
 
         if (pow_dim2_deg_resp > 0) {
             // Evaluate the random aux ideal on the curve E0 and its basis to find E_aux and B_aux
-            ret =
+            signature_step_status_t aux_status =
                 evaluate_random_aux_isogeny_signature(&Ecom_Eaux.E2, &Ecom_Eaux.B2, &random_aux_norm, &lideal_com_resp);
             (void)0;
+
+            if (aux_status == SIGNATURE_STEP_ML2_EXHAUSTED) {
+                ret = 0;
+                goto cleanup;
+            }
+            ret = (aux_status == SIGNATURE_STEP_OK);
 
             // auxiliary isogeny computation failed we must start again
             if (!ret) {
@@ -712,7 +798,8 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
         if (sig->two_resp_length > 0) {
             if (!compute_small_chain_isogeny_signature(
                     &Eaux2_Echall2.E2, &Eaux2_Echall2.B2, &resp_quat, pow_dim2_deg_resp, sig->two_resp_length)) {
-                assert(0); // this shouldn't fail
+                ret = 0;
+                goto cleanup;
             }
         }
 
@@ -729,6 +816,7 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
         sig, &Eaux2_Echall2.B1, &Eaux2_Echall2.B2, &Eaux2_Echall2.E1, &E_chall, reduced_order);
     (void)0;
 
+cleanup:
     quat_alg_elem_finalize(&resp_quat);
     quat_left_ideal_finalize(&lideal_commit);
     quat_left_ideal_finalize(&lideal_com_resp);

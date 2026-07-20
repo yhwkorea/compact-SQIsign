@@ -46,6 +46,15 @@ higher NIST levels.
 ### Build options
 
 - `-DENABLE_SIGN=ON` (default): build with sign/verify. `OFF` builds verify-only.
+- `-DENABLE_KAT_TESTS=OFF` (default): keep stored-vector tests out of the
+  normal correctness suite. `ON` enables Compact signature-verification
+  fixtures; mismatching byte-for-byte replay is not registered.
+- `-DENABLE_ML2_PROFILE=OFF` (default): collect per-dimension first-failure,
+  permutation-recovery, precision-rejection, and exhausted-retry counters in
+  the signature test binaries.
+- `-DENABLE_INTBIG_OVERFLOW_CHECK=OFF` (default): instrument signed fixed-width
+  addition, subtraction, multiplication, negation, and left shift, and abort a
+  test at the first capacity violation.
 - `-DGMP_LIBRARY={SYSTEM,BUILD,MINI}`: select libgmp source. Not relevant for
   the default fixed-precision build.
 - `-DCMAKE_BUILD_TYPE={Release,Debug,ASAN,MSAN,LSAN,UBSAN}`: optimization and
@@ -61,19 +70,46 @@ ctest --output-on-failure
 
 The test harness covers:
 
-- `sqisign_<level>_KAT_LEGACY_VERIFY` — verifies all 100 published
-  SQIsign NIST-v2 signatures.
-- `sqisign_<level>_KAT_COMPACT_VERIFY` — verifies the fixed-precision
-  Compact-SQIsign vector.
-- `sqisign_<level>_KAT_COMPACT_REPLAY_KAT` — regenerates and compares the
-  Compact-SQIsign key pair and signature byte-for-byte.
-- `sqisign_<level>_SELFTEST` — random self-tests (KeyGen + Sign + Verify).
+- `sqisign_<level>_CORRECTNESS` — fixed-seed KeyGen/Sign/Verify/Open property
+  tests, including in-place open, API length checks, and signature/message
+  tamper rejection.
+- Quaternion tests which compare the Compact ML2 output with an independent
+  exact-HNF lattice oracle, including large and dependent generator sets and
+  fail-closed reducer faults.  Production ML2 first tries the original
+  generator order, then at most three deterministic span-preserving
+  permutations; it never regenerates the surrounding protocol state.
 - Sub-library unit tests for `mp`, `gf`, `ec`, `quaternion`, `hd`, `id2iso`.
 
-See [`KAT/README.md`](KAT/README.md) for vector provenance and regeneration.
+Stored vectors are byte-for-byte regression fixtures, not an independent
+correctness oracle.  They are disabled by default.  To run the Compact
+fixtures explicitly:
 
-`ctest --timeout <seconds>` overrides the default 1500 s per-test cap (raise it
-for level 5).
+```bash
+cmake -B build -DENABLE_KAT_TESTS=ON
+cmake --build build
+ctest --test-dir build -L regression --output-on-failure
+```
+
+The legacy NIST-v2 files remain archived but are intentionally not registered
+with CTest because Compact key generation consumes a different random
+transcript.  See [`KAT/README.md`](KAT/README.md) for provenance and
+regeneration.
+
+The scheme correctness tests have a 7200-second per-test timeout because level
+5 signing is intentionally slow in the reference build.
+
+An opt-in deterministic synthetic measurement is also available (it is not a
+CTest test):
+
+```bash
+build/src/quaternion/ref/generic/test/sqisign_test_quaternion_lvl1 \
+  --ml2-stress=10000
+```
+
+This reports first-attempt and post-retry rates separately for d=4/8/16.
+Synthetic rates are bug-finding measurements and must not be interpreted as
+the failure probability of protocol-generated lattices.  For protocol input
+counts, configure with `-DENABLE_ML2_PROFILE=ON` and run the signature tests.
 
 ## Benchmarking & reproducing the published numbers
 

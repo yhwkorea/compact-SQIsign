@@ -261,4 +261,59 @@ int quat_ml2(ibz_vec_4_t *output,
              int d,
              const quat_alg_t *alg);
 
+/** Reducer signature shared by ML2 retry and fault-injection tests. */
+typedef int (*quat_ml2_reducer_t)(ibz_vec_4_t *output,
+                                  int out_capacity,
+                                  const ibz_vec_4_t *input,
+                                  int d,
+                                  const quat_alg_t *alg);
+
+/** ML2 could not be run without exceeding the active signed integer width. */
+#define QUAT_ML2_ERR_PRECISION (-2)
+
+/** Maximum number of ML2 attempts, including the unpermuted first attempt. */
+#define QUAT_ML2_RETRY_MAX_ATTEMPTS 4
+
+/**
+ * Retry a full-rank ML2 reduction using deterministic generator permutations.
+ *
+ * The original order is tried first. If it returns rank four, its output is
+ * published unchanged. Otherwise, the fixed schedule is one-step rotation,
+ * reversal, then even-indexed generators followed by odd-indexed generators.
+ * Only a rank-four result is published. `out_capacity` must be at least four;
+ * output is unchanged for an invalid capacity or if every attempt fails.
+ */
+int quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
+                                int out_capacity,
+                                const ibz_vec_4_t *input,
+                                int d,
+                                const quat_alg_t *alg,
+                                quat_ml2_reducer_t reducer);
+
+int quat_ml2_retry(ibz_vec_4_t *output,
+                   int out_capacity,
+                   const ibz_vec_4_t *input,
+                   int d,
+                   const quat_alg_t *alg);
+
+#if defined(SQISIGN_ML2_PROFILE)
+typedef struct {
+    uint64_t inputs;
+    uint64_t precision_rejected;
+    uint64_t first_attempt_failures;
+    uint64_t recovered[QUAT_ML2_RETRY_MAX_ATTEMPTS - 1];
+    uint64_t exhausted;
+    uint64_t underlying_attempts;
+} quat_ml2_profile_dimension_t;
+
+typedef struct {
+    quat_ml2_profile_dimension_t d4;
+    quat_ml2_profile_dimension_t d8;
+    quat_ml2_profile_dimension_t d16;
+} quat_ml2_profile_t;
+
+void quat_ml2_profile_reset(void);
+void quat_ml2_profile_get(quat_ml2_profile_t *profile);
+#endif
+
 #endif

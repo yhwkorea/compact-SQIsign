@@ -3,6 +3,31 @@
 #include "internal.h"
 #include "lll_internals.h" /* for quat_ml2 (paper Issue 8 wire) */
 
+static int
+quat_lattice_add_products_fit(const quat_lattice_t *lat1,
+                              const quat_lattice_t *lat2)
+{
+    int basis1_bits = 0;
+    int basis2_bits = 0;
+    for (int row = 0; row < 4; row++) {
+        for (int column = 0; column < 4; column++) {
+            int bits1 = ibz_bitsize(&lat1->basis[row][column]);
+            int bits2 = ibz_bitsize(&lat2->basis[row][column]);
+            if (bits1 > basis1_bits)
+                basis1_bits = bits1;
+            if (bits2 > basis2_bits)
+                basis2_bits = bits2;
+        }
+    }
+    int product1_bits = ibz_bitsize(&lat1->denom) + basis2_bits;
+    int product2_bits = ibz_bitsize(&lat2->denom) + basis1_bits;
+    int generator_bits = product1_bits > product2_bits ? product1_bits : product2_bits;
+    return product1_bits <= IBZ_BITS - 1 &&
+           product2_bits <= IBZ_BITS - 1 &&
+           ibz_bitsize(&lat1->denom) + ibz_bitsize(&lat2->denom) <= IBZ_BITS - 1 &&
+           2 * generator_bits + 2 <= IBZ_BITS - 1;
+}
+
 // helper functions
 int
 quat_lattice_equal(const quat_lattice_t *lat1, const quat_lattice_t *lat2)
@@ -31,8 +56,7 @@ quat_lattice_inclusion(const quat_lattice_t *sublat, const quat_lattice_t *overl
     int res;
     quat_lattice_t sum;
     quat_lattice_init(&sum);
-    quat_lattice_add(&sum, overlat, sublat);
-    res = quat_lattice_equal(&sum, overlat);
+    res = quat_lattice_add(&sum, overlat, sublat) && quat_lattice_equal(&sum, overlat);
     quat_lattice_finalize(&sum);
     return (res);
 }
@@ -89,15 +113,14 @@ quat_lattice_dual_without_hnf(quat_lattice_t *dual, const quat_lattice_t *lat)
     ibz_mat_4x4_finalize(&inv);
 }
 
-void
+int
 quat_lattice_add(quat_lattice_t *res, const quat_lattice_t *lat1, const quat_lattice_t *lat2)
 {
     ibz_vec_4_t generators[8];
     ibz_mat_4x4_t tmp;
-    ibz_t det1, det2, detprod;
-    ibz_init(&det1);
-    ibz_init(&det2);
-    ibz_init(&detprod);
+    int ok = 0;
+    if (!quat_lattice_add_products_fit(lat1, lat2))
+        return 0;
     for (int i = 0; i < 8; i++)
         ibz_vec_4_init(&(generators[i]));
     ibz_mat_4x4_init(&tmp);
@@ -123,54 +146,43 @@ quat_lattice_add(quat_lattice_t *res, const quat_lattice_t *lat1, const quat_lat
             ibz_copy(&(generators[j][i]), &(tmp[i][j]));
         }
     }
-    ibz_mat_4x4_inv_with_det_as_denom(NULL, &det1, &tmp);
     ibz_mat_4x4_scalar_mul(&tmp, &(lat2->denom), &(lat1->basis));
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             ibz_copy(&(generators[4 + j][i]), &(tmp[i][j]));
         }
     }
-    ibz_mat_4x4_inv_with_det_as_denom(NULL, &det2, &tmp);
-    assert(!ibz_is_zero(&det1));
-    assert(!ibz_is_zero(&det2));
-    ibz_gcd(&detprod, &det1, &det2);
-    /* paper Issue 8 wire (2026-05-17 04:10 retry with ml2 entry trace).
-     * Fallback (2026-05-17 18:xx): if ML2 aborts (oscillation/iter-cap),
-     * use the original HNF on the 8 generators. detprod is a multiple of
-     * the union lattice volume, suitable as the HNF modulus. */
+    /* Compact arithmetic uses ML2 directly on the eight generators.  The old
+     * HNF fallback required eager 4x4 determinants; those cofactors can exceed
+     * the fixed-width budget even when ML2's Gram matrix fits. */
     {
-        ibz_vec_4_t reduced[8];
-        for (int i = 0; i < 8; i++)
+        ibz_vec_4_t reduced[4];
+        for (int i = 0; i < 4; i++)
             ibz_vec_4_init(&reduced[i]);
-        int rho = quat_ml2(reduced, 4, generators, 8, NULL);
-        if (rho < 0) {
-            static int _hnf_fb_n = 0;
-            if (_hnf_fb_n++ < 3)
-                fprintf(stderr, "[LATTICE-ADD] ML2 abort, HNF fallback (%d)\n", _hnf_fb_n);
-            ibz_mat_4xn_hnf_mod_core(&(res->basis), 8, generators, &detprod);
-        } else {
+        int rho = quat_ml2_retry(reduced, 4, generators, 8, NULL);
+        if (rho == 4) {
             for (int j = 0; j < 4; j++)
                 for (int i = 0; i < 4; i++)
                     ibz_copy(&(res->basis[i][j]), &reduced[j][i]);
+            ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
+            quat_lattice_reduce_denom(res, res);
+            ok = 1;
         }
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < 4; i++)
             ibz_vec_4_finalize(&reduced[i]);
     }
-    ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
-    quat_lattice_reduce_denom(res, res);
     ibz_mat_4x4_finalize(&tmp);
-    ibz_finalize(&det1);
-    ibz_finalize(&det2);
-    ibz_finalize(&detprod);
     for (int i = 0; i < 8; i++)
         ibz_vec_4_finalize(&(generators[i]));
+    return ok;
 }
 
 // method described in https://cseweb.ucsd.edu/classes/sp14/cse206A-a/lec4.pdf consulted on 19 of
 // May 2023, 12h40 CEST
-void
+int
 quat_lattice_intersect(quat_lattice_t *res, const quat_lattice_t *lat1, const quat_lattice_t *lat2)
 {
+    int ok = 0;
     quat_lattice_t dual1, dual2, dual_res;
     quat_lattice_init(&dual1);
     quat_lattice_init(&dual2);
@@ -178,16 +190,20 @@ quat_lattice_intersect(quat_lattice_t *res, const quat_lattice_t *lat1, const qu
     quat_lattice_dual_without_hnf(&dual1, lat1);
 
     quat_lattice_dual_without_hnf(&dual2, lat2);
-    quat_lattice_add(&dual_res, &dual1, &dual2);
+    if (!quat_lattice_add(&dual_res, &dual1, &dual2))
+        goto cleanup;
     quat_lattice_dual_without_hnf(res, &dual_res);
     /* paper Issue 8 (2026-05-17): removed the redundant final HNF.
      * The lattice basis is already a valid (non-HNF) basis; consumers via
      * sample_response only need a basis matrix, not a unique form. Original
      * comment in upstream: "could be removed if we do not expect HNF any more". */
     /* quat_lattice_hnf(res); */
+    ok = 1;
+cleanup:
     quat_lattice_finalize(&dual1);
     quat_lattice_finalize(&dual2);
     quat_lattice_finalize(&dual_res);
+    return ok;
 }
 
 void
@@ -230,13 +246,13 @@ quat_lattice_alg_elem_mul(quat_lattice_t *prod,
             for (int j = 0; j < 4; j++)
                 ibz_copy(&gens[i][j], &(prod->basis[j][i]));
         }
-        int rho = quat_ml2(reduced, 4, gens, 4, alg);
-        if (rho >= 4) {
+        int rho = quat_ml2_retry(reduced, 4, gens, 4, alg);
+        if (rho == 4) {
             for (int i = 0; i < 4; i++)
                 for (int j = 0; j < 4; j++)
                     ibz_copy(&(prod->basis[j][i]), &reduced[i][j]);
         } else {
-            fprintf(stderr, "[ALG_ELEM_MUL] ML2 returned rho=%d (<4), keeping un-reduced basis\n", rho);
+            fprintf(stderr, "[ALG_ELEM_MUL] ML2 returned rho=%d (!=4), keeping un-reduced basis\n", rho);
         }
         for (int i = 0; i < 4; i++) {
             ibz_vec_4_finalize(&gens[i]);
@@ -246,7 +262,7 @@ quat_lattice_alg_elem_mul(quat_lattice_t *prod,
     quat_lattice_reduce_denom(prod, prod);
 }
 
-void
+int
 quat_lattice_mul(quat_lattice_t *res,
                  const quat_lattice_t *lat1,
                  const quat_lattice_t *lat2,
@@ -254,12 +270,41 @@ quat_lattice_mul(quat_lattice_t *res,
                  const ibz_t *norm1,
                  const ibz_t *norm2)
 {
+    int basis1_bits = 0;
+    int basis2_bits = 0;
+    for (int row = 0; row < 4; row++) {
+        for (int column = 0; column < 4; column++) {
+            int bits1 = ibz_bitsize(&lat1->basis[row][column]);
+            int bits2 = ibz_bitsize(&lat2->basis[row][column]);
+            if (bits1 > basis1_bits)
+                basis1_bits = bits1;
+            if (bits2 > basis2_bits)
+                basis2_bits = bits2;
+        }
+    }
+    int p_bits = ibz_bitsize(&alg->p);
+    int generator_product_bound = basis1_bits + basis2_bits + p_bits + 3;
+    int denom1_bits = ibz_bitsize(&lat1->denom);
+    int denom2_bits = ibz_bitsize(&lat2->denom);
+    int hnfmod_bound = 2 * ibz_bitsize(norm1) + 2 * ibz_bitsize(norm2) +
+                       4 * denom1_bits + 4 * denom2_bits;
+    int safety_margin = 64;
+    int use_ml2 = hnfmod_bound > IBZ_BITS - 1 ||
+                  2 * hnfmod_bound + safety_margin > IBZ_BITS;
+
+    assert(ibz_cmp(norm1, &ibz_const_zero) > 0);
+    assert(ibz_cmp(norm2, &ibz_const_zero) > 0);
+    if (generator_product_bound > IBZ_BITS - 1 ||
+        denom1_bits + denom2_bits > IBZ_BITS - 1)
+        return 0;
+
     ibz_vec_4_t elem1, elem2, elem_res;
     ibz_vec_4_t generators[16];
     // ibz_mat_4x4_t detmat;
     // ibz_t det;
     ibz_t hnfmod, r1, r2;
     quat_lattice_t lat_res;
+    int ok = 0;
     // ibz_init(&det);
     // ibz_mat_4x4_init(&detmat);
     ibz_init(&hnfmod);
@@ -285,23 +330,19 @@ quat_lattice_mul(quat_lattice_t *res,
             }
         }
     }
-
-
-    assert(ibz_cmp(norm1, &ibz_const_zero) > 0);
-    assert(ibz_cmp(norm2, &ibz_const_zero) > 0);
-
-
-    /*ibz_mat_4x4_inv_with_det_as_denom(NULL, &det, &detmat);
-    ibz_abs(&det, &det);*/
-    ibz_mul(&hnfmod, norm1, norm1);
-    ibz_mul(&hnfmod, &hnfmod, norm2);
-    ibz_mul(&hnfmod, &hnfmod, norm2);
-    ibz_mul(&r1, &(lat1->denom), &(lat1->denom));
-    ibz_mul(&r1, &r1, &r1);
-    ibz_mul(&r2, &(lat2->denom), &(lat2->denom));
-    ibz_mul(&r2, &r2, &r2);
-    ibz_mul(&hnfmod, &hnfmod, &r1);
-    ibz_mul(&hnfmod, &hnfmod, &r2);
+    /* Compute the HNF modulus only when its complete multiplication chain is
+     * known to fit.  The ML2 branch does not need this value. */
+    if (!use_ml2) {
+        ibz_mul(&hnfmod, norm1, norm1);
+        ibz_mul(&hnfmod, &hnfmod, norm2);
+        ibz_mul(&hnfmod, &hnfmod, norm2);
+        ibz_mul(&r1, &(lat1->denom), &(lat1->denom));
+        ibz_mul(&r1, &r1, &r1);
+        ibz_mul(&r2, &(lat2->denom), &(lat2->denom));
+        ibz_mul(&r2, &r2, &r2);
+        ibz_mul(&hnfmod, &hnfmod, &r1);
+        ibz_mul(&hnfmod, &hnfmod, &r2);
+    }
     // ibz_t t1, t2;
     // ibz_init(&t1);
     // ibz_init(&t2);
@@ -324,8 +365,9 @@ quat_lattice_mul(quat_lattice_t *res,
                 int b = ibz_bitsize(&(generators[g][c]));
                 if (b > gmax) gmax = b;
             }
-        fprintf(stderr, "[LMUL] enter hnfmod_bits=%d gen_max_bit=%d (transient mul ~= 2*hnfmod = %d)\n",
-                ibz_bitsize(&hnfmod), gmax, 2 * ibz_bitsize(&hnfmod));
+        int reported_hnfmod_bits = use_ml2 ? hnfmod_bound : ibz_bitsize(&hnfmod);
+        fprintf(stderr, "[LMUL] enter hnfmod_bits<=%d gen_max_bit=%d (transient mul ~= 2*hnfmod = %d)\n",
+                reported_hnfmod_bits, gmax, 2 * reported_hnfmod_bits);
         fflush(stderr);
     }
     /* paper Issue 11/12 spec: when HNF mod core's m^2 transient would exceed
@@ -341,37 +383,34 @@ quat_lattice_mul(quat_lattice_t *res,
      * 110-limb had a known regression (oscillation in dpe precision), so we
      * only invoke it when forced by the cap. */
     {
-        int hnfmod_bits = ibz_bitsize(&hnfmod);
-        int safety_margin = 64; /* conservative; xgcd produces u,v slightly larger than m/d */
-        int use_ml2 = (2 * hnfmod_bits + safety_margin) > IBZ_BITS;
+        int hnfmod_bits = use_ml2 ? hnfmod_bound : ibz_bitsize(&hnfmod);
         if (use_ml2) {
             ibz_vec_4_t reduced[4];
             for (int i = 0; i < 4; i++)
                 ibz_vec_4_init(&reduced[i]);
-            int rho = quat_ml2(reduced, 4, generators, 16, alg);
-            if (rho >= 4) {
+            int rho = quat_ml2_retry(reduced, 4, generators, 16, alg);
+            if (rho == 4) {
                 for (int j = 0; j < 4; j++)
                     for (int i = 0; i < 4; i++)
                         ibz_copy(&(res->basis[i][j]), &reduced[j][i]);
                 fprintf(stderr, "[LMUL] ML2(d=16) ok, rho=%d (forced: 2*hnfmod=%d > IBZ_BITS=%d)\n",
                         rho, 2 * hnfmod_bits, IBZ_BITS);
                 fflush(stderr);
-            } else {
-                static int _lmul_fb_n = 0;
-                if (_lmul_fb_n++ < 3)
-                    fprintf(stderr, "[LMUL] ML2(d=16) abort, HNF fallback (%d)\n", _lmul_fb_n);
-                fflush(stderr);
-                ibz_mat_4xn_hnf_mod_core(&(res->basis), 16, generators, &hnfmod);
+                ok = 1;
             }
             for (int i = 0; i < 4; i++)
                 ibz_vec_4_finalize(&reduced[i]);
         } else {
             ibz_mat_4xn_hnf_mod_core(&(res->basis), 16, generators, &hnfmod);
+            ok = 1;
         }
     }
+    if (!ok)
+        goto cleanup;
     fprintf(stderr, "[LMUL] reduce returned\n"); fflush(stderr);
     ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
     quat_lattice_reduce_denom(res, res);
+cleanup:
     ibz_vec_4_finalize(&elem1);
     ibz_vec_4_finalize(&elem2);
     ibz_vec_4_finalize(&elem_res);
@@ -383,6 +422,7 @@ quat_lattice_mul(quat_lattice_t *res,
     ibz_finalize(&r2);
     for (int i = 0; i < 16; i++)
         ibz_vec_4_finalize(&(generators[i]));
+    return ok;
 }
 
 // lattice assumed of full rank

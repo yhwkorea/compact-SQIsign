@@ -105,7 +105,7 @@ void endomorphism_application_even_basis(ec_basis_t *P,
  * respect to the precomputed 2^f basis
  *
  */
-void id2iso_kernel_dlogs_to_ideal_even(quat_left_ideal_t *lideal, const ibz_vec_2_t *vec2, int f);
+int id2iso_kernel_dlogs_to_ideal_even(quat_left_ideal_t *lideal, const ibz_vec_2_t *vec2, int f);
 
 /**
  * @brief Change of basis matrix for full basis B2
@@ -165,7 +165,9 @@ void change_of_basis_matrix_tate_invert(ibz_mat_2x2_t *mat,
  * @param lideal : O0-ideal defining the search space
  * @param Bpoo : quaternion algebra
  * @param num_alternate_order number of alternate order we consider
- * @returns 1 if the computation succeeds, 0 otherwise
+ * @returns 1 if the computation succeeds, 0 for an ordinary search miss,
+ *          or ID2ISO_STATUS_FATAL when compact fixed-precision reduction
+ *          failed after all local ML2 attempts.
  *
  * Let us write ti = index_alternate_order_i,
  * we look for u,v,beta1,beta2,d1,d2,t1,t2
@@ -175,6 +177,8 @@ void change_of_basis_matrix_tate_invert(ibz_mat_2x2_t *mat,
  * contained between 0 and num_alternate_order This corresponds to the function SuitableIdeals in
  * the spec
  */
+#define ID2ISO_STATUS_FATAL (-1)
+
 int find_uv(ibz_t *u,
             ibz_t *v,
             quat_alg_elem_t *beta1,
@@ -203,8 +207,8 @@ int find_uv(ibz_t *u,
  * @param numP: length of the list of points given in P12 (can be zero)
  * @param index_alternate_order : index of the special extremal order to be used (in the list of
  these orders)
- * @returns the length of the chain if the computation succeeded, zero upon
- failure
+ * @returns the positive chain length if the computation succeeded, zero upon
+ * ordinary failure, or ID2ISO_STATUS_FATAL upon compact reduction failure.
  *
  * F is an isogeny encoding an isogeny [adjust]*phi : E0 -> Eu of degree u
  * note that the codomain of F can be either Eu x Eu' or Eu' x Eu for some curve
@@ -233,7 +237,8 @@ int fixed_degree_isogeny_and_eval(quat_left_ideal_t *lideal,
  * ideal corresponding to lideal
  * @param lideal : O0 - ideal in input
  * @param Bpoo : the quaternion algebra
- * @returns 1 if the computation succeeded, 0 otherwise
+ * @returns 1 if the computation succeeded, 0 for an ordinary stochastic
+ *          failure, or ID2ISO_STATUS_FATAL upon compact reduction failure.
  *
  * Compute the codomain and image on the basis of E0 of the isogeny
  * E0 -> codomain corresponding to lideal
@@ -265,7 +270,8 @@ int dim2id2iso_ideal_to_isogeny_clapotis(quat_alg_elem_t *beta1,
  * ideal corresponding to lideal
  * @param lideal : ideal in input
  * @param codomain
- * @returns 1 if the computation succeeds, 0 otherwise
+ * @returns 1 if the computation succeeds, 0 for an ordinary stochastic
+ *          failure, or ID2ISO_STATUS_FATAL upon compact reduction failure.
  *
  * This is a wrapper around the ideal to isogeny clapotis function
  */

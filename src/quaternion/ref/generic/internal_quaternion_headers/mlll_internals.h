@@ -10,6 +10,7 @@
  */
 
 #include <quaternion.h>
+#include "lll_internals.h"
 
 /** @brief Maximum number of generators MLLL can accept */
 #define MLLL_MAX_GENERATORS 16
@@ -53,18 +54,28 @@ void quat_lattice_mul_mlll(quat_lattice_t *res,
                            const quat_alg_t *alg);
 
 /**
- * @brief Lattice addition using MLLL instead of HNF
+ * @brief Lattice addition using ML2 instead of HNF
  *
  * Replaces quat_lattice_add with MLLL-based approach.
  *
  * @param res Output: sum lattice
  * @param lat1 First lattice
  * @param lat2 Second lattice
+ * @param alg The quaternion algebra
+ * @param reducer Reducer implementation; production passes quat_ml2_retry
+ * @returns 1 on success, 0 if the reducer did not return a rank-four basis.
+ *          On failure, res is left unchanged.
  */
-void quat_lattice_add_mlll(quat_lattice_t *res,
-                           const quat_lattice_t *lat1,
-                           const quat_lattice_t *lat2,
-                           const quat_alg_t *alg);
+int quat_lattice_add_mlll_with_reducer(quat_lattice_t *res,
+                                       const quat_lattice_t *lat1,
+                                       const quat_lattice_t *lat2,
+                                       const quat_alg_t *alg,
+                                       quat_ml2_reducer_t reducer);
+
+int quat_lattice_add_mlll(quat_lattice_t *res,
+                          const quat_lattice_t *lat1,
+                          const quat_lattice_t *lat2,
+                          const quat_alg_t *alg);
 
 /**
  * @brief Lattice intersection using MLLL instead of HNF (Phase 2 hot-path)
@@ -79,10 +90,12 @@ void quat_lattice_add_mlll(quat_lattice_t *res,
  * @param lat1 First lattice
  * @param lat2 Second lattice
  * @param alg The quaternion algebra (passed through to MLLL)
+ * @returns 1 on success, 0 if an internal full-rank reduction failed.
+ *          On failure, res is left unchanged.
  */
-void quat_lattice_intersect_mlll(quat_lattice_t *res,
-                                 const quat_lattice_t *lat1,
-                                 const quat_lattice_t *lat2,
-                                 const quat_alg_t *alg);
+int quat_lattice_intersect_mlll(quat_lattice_t *res,
+                                const quat_lattice_t *lat1,
+                                const quat_lattice_t *lat2,
+                                const quat_alg_t *alg);
 
 #endif

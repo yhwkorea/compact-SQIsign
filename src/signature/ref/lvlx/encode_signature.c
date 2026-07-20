@@ -172,7 +172,7 @@ secret_key_to_bytes(byte_t *enc, const secret_key_t *sk, const public_key_t *pk)
     assert(enc - start == SECRETKEY_BYTES);
 }
 
-void
+int
 secret_key_from_bytes(secret_key_t *sk, public_key_t *pk, const byte_t *enc)
 {
 #ifndef NDEBUG
@@ -193,9 +193,12 @@ secret_key_from_bytes(secret_key_t *sk, public_key_t *pk, const byte_t *enc)
         enc = ibz_from_bytes(&gen.coord[3], enc, FP_ENCODED_BYTES, true);
         /* paper Issue 9: norm is read from the encoded sk where it was stored
          * as the actual nrd of secret_ideal during keygen serialization. */
-        quat_lideal_create_with_norm(&sk->secret_ideal, &gen, &norm, &MAXORD_O0, &QUATALG_PINFTY);
+        int ok = quat_lideal_create_with_norm(
+            &sk->secret_ideal, &gen, &norm, &MAXORD_O0, &QUATALG_PINFTY);
         ibz_finalize(&norm);
         quat_alg_elem_finalize(&gen);
+        if (!ok)
+            return 0;
     }
 
     enc = ibz_from_bytes(&sk->mat_BAcan_to_BA0_two[0][0], enc, TORSION_2POWER_BYTES, false);
@@ -207,4 +210,5 @@ secret_key_from_bytes(secret_key_t *sk, public_key_t *pk, const byte_t *enc)
 
     sk->curve = pk->curve;
     ec_curve_to_basis_2f_from_hint(&sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER, pk->hint_pk);
+    return 1;
 }

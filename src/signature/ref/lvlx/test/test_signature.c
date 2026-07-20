@@ -10,6 +10,32 @@
 #include <rng.h>
 #include <bench_test_arguments.h>
 
+#if defined(SQISIGN_ML2_PROFILE)
+#include "lll_internals.h"
+
+static void
+print_ml2_profile_dimension(int d, const quat_ml2_profile_dimension_t *profile)
+{
+    printf("ML2_PROFILE,d=%d,inputs=%" PRIu64
+           ",precision_rejected=%" PRIu64
+           ",first_failures=%" PRIu64
+           ",recovered_1=%" PRIu64
+           ",recovered_2=%" PRIu64
+           ",recovered_3=%" PRIu64
+           ",exhausted=%" PRIu64
+           ",underlying_attempts=%" PRIu64 "\n",
+           d,
+           profile->inputs,
+           profile->precision_rejected,
+           profile->first_attempt_failures,
+           profile->recovered[0],
+           profile->recovered[1],
+           profile->recovered[2],
+           profile->exhausted,
+           profile->underlying_attempts);
+}
+#endif
+
 int
 test_sqisign(int repeat)
 {
@@ -95,7 +121,21 @@ main(int argc, char *argv[])
 
     randombytes_init((unsigned char *)seed, NULL, 256);
 
+#if defined(SQISIGN_ML2_PROFILE)
+    quat_ml2_profile_reset();
+#endif
+
     res = test_sqisign(iterations);
+
+#if defined(SQISIGN_ML2_PROFILE)
+    {
+        quat_ml2_profile_t profile;
+        quat_ml2_profile_get(&profile);
+        print_ml2_profile_dimension(4, &profile.d4);
+        print_ml2_profile_dimension(8, &profile.d8);
+        print_ml2_profile_dimension(16, &profile.d16);
+    }
+#endif
 
     if (!res) {
         printf("\nSome tests failed!\n");

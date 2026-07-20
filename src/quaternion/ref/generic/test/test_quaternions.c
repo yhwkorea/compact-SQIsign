@@ -1,11 +1,15 @@
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "quaternion_tests.h"
 #include <rng.h>
 #include <bench_test_arguments.h>
+
+int quat_test_ml2_stress(uint32_t samples);
 
 // run all tests in module
 int
@@ -15,10 +19,25 @@ main(int argc, char *argv[])
     int help = 0;
     int seed_set = 0;
     int res = 0;
+    uint32_t ml2_stress_samples = 0;
 
     for (int i = 1; i < argc; i++) {
         if (!help && strcmp(argv[i], "--help") == 0) {
             help = 1;
+            continue;
+        }
+
+        if (strncmp(argv[i], "--ml2-stress=", 13) == 0) {
+            char *end = NULL;
+            errno = 0;
+            unsigned long parsed = strtoul(argv[i] + 13, &end, 10);
+            if (errno != 0 || end == argv[i] + 13 || *end != '\0' ||
+                parsed == 0 || parsed > 1000000UL) {
+                fprintf(stderr,
+                        "Invalid --ml2-stress sample count (expected 1..1000000)\n");
+                return 1;
+            }
+            ml2_stress_samples = (uint32_t)parsed;
             continue;
         }
 
@@ -32,8 +51,13 @@ main(int argc, char *argv[])
         printf("Usage: %s [--seed=<seed>]\n", argv[0]);
         printf("Where <seed> is the random seed to be used; if not present, a random seed is "
                "generated\n");
+        printf("       %s --ml2-stress=<samples-per-d>\n", argv[0]);
+        printf("Runs the opt-in deterministic d=4/8/16 ML2 retry-rate measurement.\n");
         return 1;
     }
+
+    if (ml2_stress_samples != 0)
+        return quat_test_ml2_stress(ml2_stress_samples);
 
     if (!seed_set) {
         randombytes_select((unsigned char *)seed, sizeof(seed));
@@ -63,6 +87,7 @@ main(int argc, char *argv[])
     // res = res | quat_test_lattice();
     // res = res | quat_test_lll();
     res = res | quat_test_mlll();
+    res = res | quat_test_ml2_correctness();
     // res = res | quat_test_lideal();
     // res = res | quat_test_normeq();
     // res = res | quat_test_lat_ball();

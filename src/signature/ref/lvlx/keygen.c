@@ -98,17 +98,25 @@ protocols_keygen(public_key_t *pk, secret_key_t *sk)
 
     // iterating until a solution has been found
     while (!found) {
-
-        found = quat_sampling_random_ideal_O0_given_norm(
+        quat_random_ideal_status_t sampling_status =
+            quat_sampling_random_ideal_O0_given_norm(
             &sk->secret_ideal, &SEC_DEGREE, 1, &QUAT_represent_integer_params, NULL);
+        if (sampling_status == QUAT_RANDOM_IDEAL_FATAL)
+            return 0;
+        found = (sampling_status == QUAT_RANDOM_IDEAL_SUCCESS);
 
         // replacing the secret key ideal by a shorter equivalent one for efficiency
         found = found && quat_lideal_prime_norm_reduced_equivalent(
                              &sk->secret_ideal, &QUATALG_PINFTY, QUAT_primality_num_iter, QUAT_equiv_bound_coeff);
 
         // ideal to isogeny clapotis
-
-        found = found && dim2id2iso_arbitrary_isogeny_evaluation(&B_0_two, &sk->curve, &sk->secret_ideal);
+        if (found) {
+            int isogeny_status = dim2id2iso_arbitrary_isogeny_evaluation(
+                &B_0_two, &sk->curve, &sk->secret_ideal);
+            if (isogeny_status == ID2ISO_STATUS_FATAL)
+                return 0;
+            found = (isogeny_status > 0);
+        }
     }
 
     // Assert the isogeny was found and images have the correct order

@@ -6,6 +6,20 @@
 
 #include "intbig.h"
 
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+#include <stdlib.h>
+
+static void
+ibz_overflow_abort(const char *operation)
+{
+    fprintf(stderr,
+            "[INTBIG-OVERFLOW] %s exceeds %d-bit signed capacity\n",
+            operation,
+            IBZ_BITS);
+    abort();
+}
+#endif
+
 const uint64_t ibz_const_zero[IBZ_LIMBS] = { 0 };
 const uint64_t ibz_const_one[IBZ_LIMBS] = { 1 };
 const uint64_t ibz_const_two[IBZ_LIMBS] = { 2 };
@@ -148,9 +162,11 @@ ibz_is_negative(const ibz_t *x)
     return ((*x)[IBZ_LIMBS - 1] >> 63) & 1;
 }
 
-// Negation (2's complement)
-void
-ibz_neg(ibz_t *neg, const ibz_t *a)
+// Raw two's-complement negation. Multiplication also uses this on an unsigned
+// magnitude before assigning its sign, so overflow policy belongs in the
+// public signed wrapper below.
+static void
+ibz_neg_raw(ibz_t *neg, const ibz_t *a)
 {
     uint64_t carry = 1;
     for (int i = 0; i < IBZ_LIMBS; i++) {
@@ -158,6 +174,22 @@ ibz_neg(ibz_t *neg, const ibz_t *a)
         (*neg)[i] = tmp + carry;
         carry = ((*neg)[i] < tmp) ? 1 : 0;
     }
+}
+
+// Negation (2's complement)
+void
+ibz_neg(ibz_t *neg, const ibz_t *a)
+{
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    int input_negative = ibz_is_negative(a);
+#endif
+    ibz_neg_raw(neg, a);
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    /* The only negative input whose two's-complement negation is still
+     * negative is -2^(IBZ_BITS-1), which has no positive counterpart. */
+    if (input_negative && ibz_is_negative(neg))
+        ibz_overflow_abort("negation");
+#endif
 }
 
 // Absolute value
@@ -175,6 +207,10 @@ ibz_abs(ibz_t *abs, const ibz_t *a)
 void
 ibz_add(ibz_t *sum, const ibz_t *a, const ibz_t *b)
 {
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    int a_negative = ibz_is_negative(a);
+    int b_negative = ibz_is_negative(b);
+#endif
     uint64_t carry = 0;
     for (int i = 0; i < IBZ_LIMBS; i++) {
         uint64_t tmp = (*a)[i] + carry;
@@ -182,12 +218,20 @@ ibz_add(ibz_t *sum, const ibz_t *a, const ibz_t *b)
         (*sum)[i] = tmp + (*b)[i];
         carry += ((*sum)[i] < tmp) ? 1 : 0;
     }
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    if (a_negative == b_negative && ibz_is_negative(sum) != a_negative)
+        ibz_overflow_abort("addition");
+#endif
 }
 
 // Subtraction
 void
 ibz_sub(ibz_t *diff, const ibz_t *a, const ibz_t *b)
 {
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    int a_negative = ibz_is_negative(a);
+    int b_negative = ibz_is_negative(b);
+#endif
     uint64_t borrow = 0;
     for (int i = 0; i < IBZ_LIMBS; i++) {
         uint64_t tmp = (*a)[i] - borrow;
@@ -196,6 +240,10 @@ ibz_sub(ibz_t *diff, const ibz_t *a, const ibz_t *b)
         borrow += (tmp2 > tmp) ? 1 : 0;
         (*diff)[i] = tmp2;
     }
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    if (a_negative != b_negative && ibz_is_negative(diff) != a_negative)
+        ibz_overflow_abort("subtraction");
+#endif
 }
 
 // static void
@@ -399,6 +447,26 @@ ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b)
         }
     }
 
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    {
+        int overflow = 0;
+        for (int i = IBZ_LIMBS; i < 2 * IBZ_LIMBS; i++)
+            overflow |= temp_result[i] != 0;
+
+        if (!neg) {
+            overflow |= (temp_result[IBZ_LIMBS - 1] >> 63) != 0;
+        } else if (temp_result[IBZ_LIMBS - 1] > (UINT64_C(1) << 63)) {
+            overflow = 1;
+        } else if (temp_result[IBZ_LIMBS - 1] == (UINT64_C(1) << 63)) {
+            for (int i = 0; i < IBZ_LIMBS - 1; i++)
+                overflow |= temp_result[i] != 0;
+        }
+
+        if (overflow)
+            ibz_overflow_abort("multiplication");
+    }
+#endif
+
     // write low limbs
     for (int i = 0; i < IBZ_LIMBS; i++) {
         (*prod)[i] = temp_result[i];
@@ -406,7 +474,7 @@ ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b)
 
     // apply sign
     if (neg && !ibz_is_zero(prod)) {
-        ibz_neg(prod, prod);
+        ibz_neg_raw(prod, prod);
     }
 }
 
@@ -462,6 +530,10 @@ ibz_mul_2exp(ibz_t *result, const ibz_t *a, size_t shift)
 
     if (limb_shift >= IBZ_LIMBS) {
         // out of range -> just zero
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+        if (!ibz_is_zero(src))
+            ibz_overflow_abort("left shift");
+#endif
         return;
     }
 
@@ -479,6 +551,18 @@ ibz_mul_2exp(ibz_t *result, const ibz_t *a, size_t shift)
             }
         }
     }
+
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    /* A signed left shift is exact iff shifting the result arithmetically
+     * back by the same amount recovers the input. */
+    {
+        ibz_t roundtrip;
+        ibz_init(&roundtrip);
+        ibz_div_2exp(&roundtrip, result, (uint32_t)shift);
+        if (ibz_cmp(&roundtrip, src) != 0)
+            ibz_overflow_abort("left shift");
+    }
+#endif
 }
 
 // Division by power of 2

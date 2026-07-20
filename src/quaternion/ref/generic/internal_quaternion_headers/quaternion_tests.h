@@ -293,6 +293,7 @@ int quat_test_lattice(void);
  */
 int quat_test_lll(void);
 int quat_test_mlll(void);
+int quat_test_ml2_correctness(void);
 
 /** @brief Test operations on left ideals and their creation
  *

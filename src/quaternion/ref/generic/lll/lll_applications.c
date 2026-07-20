@@ -25,7 +25,7 @@ quat_lideal_reduce_basis(ibz_mat_4x4_t *reduced,
     ibz_finalize(&gram_corrector);
 }
 
-void
+int
 quat_lideal_lideal_mul_reduced(quat_left_ideal_t *prod,
                                ibz_mat_4x4_t *gram,
                                const quat_left_ideal_t *lideal1,
@@ -48,8 +48,15 @@ quat_lideal_lideal_mul_reduced(quat_left_ideal_t *prod,
         fflush(stderr);
     }
 
-    quat_lattice_mul(
-        &(prod->lattice), &(lideal1->lattice), &(lideal2->lattice), alg, (&lideal1->norm), &(lideal2->norm));
+    if (!quat_lattice_mul(&(prod->lattice),
+                          &(lideal1->lattice),
+                          &(lideal2->lattice),
+                          alg,
+                          (&lideal1->norm),
+                          &(lideal2->norm))) {
+        ibz_mat_4x4_finalize(&red);
+        return 0;
+    }
 
     {
         int bp = ibz_bitsize(&(prod->lattice.basis[0][0]));
@@ -75,6 +82,7 @@ quat_lideal_lideal_mul_reduced(quat_left_ideal_t *prod,
     }
 
     ibz_mat_4x4_finalize(&red);
+    return 1;
 }
 
 int

@@ -244,26 +244,43 @@ quat_test_sampling_random_ideal_O0_given_norm()
     quat_alg_init_set(&alg, &p);
     quat_test_set_params_standard(&params, &O0, &alg);
     ibz_set(&p, 1338708463);
-    res = res || !quat_sampling_random_ideal_O0_given_norm(&lideal, &p, 1, &params, NULL);
+    if (quat_sampling_random_ideal_O0_given_norm(
+            &lideal, &p, 1, &params, NULL) != QUAT_RANDOM_IDEAL_SUCCESS) {
+        res = 1;
+        goto cleanup;
+    }
     res = res || (ibz_cmp(&(lideal.norm), &p) != 0);
     quat_lideal_norm(&lideal);
     res = res || (ibz_cmp(&(lideal.norm), &p) != 0);
     res = res || !ibz_mat_4x4_equal(&(O0.order.basis), &(lideal.parent_order->basis));
     res = res || (0 != ibz_cmp(&(O0.order.denom), &(lideal.parent_order->denom)));
-    quat_lattice_mul(&test, &(lideal.lattice), &(lideal.lattice), &alg, &(lideal.norm), &(lideal.norm));
+    if (!quat_lattice_mul(
+            &test, &(lideal.lattice), &(lideal.lattice), &alg, &(lideal.norm), &(lideal.norm))) {
+        res = 1;
+        goto cleanup;
+    }
     res = res || !quat_lattice_inclusion(&test, &(lideal.lattice));
 
     ibz_set(&p, 3093 * 59471);
     ibz_set(&coprime, 1533069337);
-    res = res || !quat_sampling_random_ideal_O0_given_norm(&lideal, &p, 0, &params, &coprime);
+    if (quat_sampling_random_ideal_O0_given_norm(
+            &lideal, &p, 0, &params, &coprime) != QUAT_RANDOM_IDEAL_SUCCESS) {
+        res = 1;
+        goto cleanup;
+    }
     res = res || (ibz_cmp(&(lideal.norm), &p) != 0);
     quat_lideal_norm(&lideal);
     res = res || (ibz_cmp(&(lideal.norm), &p) != 0);
     res = res || !ibz_mat_4x4_equal(&(O0.order.basis), &(lideal.parent_order->basis));
     res = res || (0 != ibz_cmp(&(O0.order.denom), &(lideal.parent_order->denom)));
-    quat_lattice_mul(&test, &(lideal.lattice), &(lideal.lattice), &alg, &(lideal.norm), &(lideal.norm));
+    if (!quat_lattice_mul(
+            &test, &(lideal.lattice), &(lideal.lattice), &alg, &(lideal.norm), &(lideal.norm))) {
+        res = 1;
+        goto cleanup;
+    }
     res = res || !quat_lattice_inclusion(&test, &(lideal.lattice));
 
+cleanup:
     if (res) {
         printf("Quaternion unit test sampling_random_ideal_O0_given_norm failed\n");
     }

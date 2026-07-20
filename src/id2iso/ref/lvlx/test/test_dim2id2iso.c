@@ -32,6 +32,7 @@ int
 dim2id2iso_test_fixed_degree_isogeny(void)
 {
     int ret;
+    int result = 1;
     ibz_t u, two_pow;
     ibz_t tmp;
     quat_left_ideal_t lideal;
@@ -87,7 +88,10 @@ dim2id2iso_test_fixed_degree_isogeny(void)
             // Compute the isogeny and evaluation
             ret = fixed_degree_isogeny_and_eval(
                 &lideal, &u, 0, &codomain, pushed_points, sizeof(pushed_points) / sizeof(*pushed_points), i);
-            assert(ret);
+            if (ret <= 0) {
+                result = 0;
+                goto cleanup;
+            }
             unsigned int length = (unsigned int)ret;
 
             assert(ec_is_on_curve(&Tev1->P2, &codomain.E2));
@@ -124,12 +128,13 @@ dim2id2iso_test_fixed_degree_isogeny(void)
         }
     }
 
+cleanup:
     ibz_finalize(&tmp);
     ibz_finalize(&u);
     ibz_finalize(&two_pow);
     quat_left_ideal_finalize(&lideal);
 
-    return 1;
+    return result;
 }
 
 int
@@ -177,34 +182,40 @@ dim2id2iso_test_find_uv(void)
     ibz_mul(&temp, &n1, &n2);
     found = found && quat_represent_integer(&gen, &temp, 0, &QUAT_represent_integer_params);
     assert(found);
-    quat_lideal_create(&lideal_small, &gen, &n1, &STANDARD_EXTREMAL_ORDER.order, &QUATALG_PINFTY);
+    if (!quat_lideal_create(
+            &lideal_small, &gen, &n1, &STANDARD_EXTREMAL_ORDER.order, &QUATALG_PINFTY)) {
+        found = 0;
+        goto cleanup_find_uv;
+    }
 
     int exp = TORSION_EVEN_POWER;
     ibz_pow(&target, &ibz_const_two, exp);
 
     found = 0;
+    int find_status = 0;
     int num_rerun = 0;
     int max_num_rerun = 2;
     int index_alternate_order_1;
     int index_alternate_order_2;
-    while (!found && num_rerun < max_num_rerun) {
-        found = find_uv(&u,
-                        &v,
-                        &beta1,
-                        &beta2,
-                        &d1,
-                        &d2,
-                        &index_alternate_order_1,
-                        &index_alternate_order_2,
-                        &target,
-                        &lideal_small,
-                        &QUATALG_PINFTY,
-                        NUM_ALTERNATE_EXTREMAL_ORDERS);
+    while (find_status == 0 && num_rerun < max_num_rerun) {
+        find_status = find_uv(&u,
+                              &v,
+                              &beta1,
+                              &beta2,
+                              &d1,
+                              &d2,
+                              &index_alternate_order_1,
+                              &index_alternate_order_2,
+                              &target,
+                              &lideal_small,
+                              &QUATALG_PINFTY,
+                              NUM_ALTERNATE_EXTREMAL_ORDERS);
         if (num_rerun > 0) {
             printf("alternate rerun ! \n");
         }
         num_rerun++;
     }
+    found = find_status > 0;
     // TOC_clock(t,"alternate find_uv");
     // printf("\n\n");
     // assert(found);
@@ -213,6 +224,7 @@ dim2id2iso_test_find_uv(void)
         printf("alternate failed \n");
     }
 
+cleanup_find_uv:
     ibz_finalize(&norm_d);
     ibz_finalize(&temp);
     ibz_finalize(&remainder);
@@ -278,7 +290,13 @@ dim2id2iso_test_dimid2iso(void)
         quat_left_ideal_t id;
         quat_left_ideal_init(&id);
         quat_lideal_copy(&id, &ALTERNATE_CONNECTING_IDEALS[i]);
-        found = found && dim2id2iso_arbitrary_isogeny_evaluation(&bas_check, &codom_check, &id);
+        int isogeny_status =
+            dim2id2iso_arbitrary_isogeny_evaluation(&bas_check, &codom_check, &id);
+        if (isogeny_status <= 0) {
+            found = 0;
+            quat_left_ideal_finalize(&id);
+            goto cleanup;
+        }
         ec_isom_t isom;
         ec_isomorphism(&isom, &codom_check, &ALTERNATE_STARTING_CURVES[i].curve);
         ec_iso_eval(&bas_check.P, &isom);
@@ -301,13 +319,19 @@ dim2id2iso_test_dimid2iso(void)
     ibz_mul(&temp, &n1, &n2);
     found = found && quat_represent_integer(&gen, &temp, 0, &QUAT_represent_integer_params);
     assert(found);
-    quat_lideal_create(&lideal_small, &gen, &n1, &STANDARD_EXTREMAL_ORDER.order, &QUATALG_PINFTY);
+    if (!quat_lideal_create(
+            &lideal_small, &gen, &n1, &STANDARD_EXTREMAL_ORDER.order, &QUATALG_PINFTY)) {
+        found = 0;
+        goto cleanup;
+    }
     ec_basis_t bas_end;
     ec_curve_t codom;
     ec_curve_init(&codom);
 
     found = dim2id2iso_ideal_to_isogeny_clapotis(
-        &beta1, &beta2, &u, &v, &d1, &d2, &codom, &bas_end, &lideal_small, &QUATALG_PINFTY);
+                &beta1, &beta2, &u, &v, &d1, &d2, &codom, &bas_end, &lideal_small, &QUATALG_PINFTY) > 0;
+    if (!found)
+        goto cleanup;
 
     for (int i = 0; i < 10; i++) {
         ibz_generate_random_prime(
@@ -317,11 +341,18 @@ dim2id2iso_test_dimid2iso(void)
         ibz_mul(&temp, &n1, &n2);
         found = found && quat_represent_integer(&gen, &temp, 0, &QUAT_represent_integer_params);
         assert(found);
-        quat_lideal_create(&lideal_small, &gen, &n1, &STANDARD_EXTREMAL_ORDER.order, &QUATALG_PINFTY);
+        if (!quat_lideal_create(
+                &lideal_small, &gen, &n1, &STANDARD_EXTREMAL_ORDER.order, &QUATALG_PINFTY)) {
+            found = 0;
+            goto cleanup;
+        }
         found = dim2id2iso_ideal_to_isogeny_clapotis(
-            &beta1, &beta2, &u, &v, &d1, &d2, &codom, &bas_end, &lideal_small, &QUATALG_PINFTY);
+                    &beta1, &beta2, &u, &v, &d1, &d2, &codom, &bas_end, &lideal_small, &QUATALG_PINFTY) > 0;
+        if (!found)
+            goto cleanup;
     }
 
+cleanup:
     ibz_finalize(&temp);
     ibz_finalize(&remainder);
     ibz_finalize(&n1);

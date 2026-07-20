@@ -37,6 +37,31 @@
 
 #define N MLLL_MAX_GENERATORS
 
+static int
+mlll_lattice_add_products_fit(const quat_lattice_t *lat1,
+                              const quat_lattice_t *lat2)
+{
+    int basis1_bits = 0;
+    int basis2_bits = 0;
+    for (int row = 0; row < 4; row++) {
+        for (int column = 0; column < 4; column++) {
+            int bits1 = ibz_bitsize(&lat1->basis[row][column]);
+            int bits2 = ibz_bitsize(&lat2->basis[row][column]);
+            if (bits1 > basis1_bits)
+                basis1_bits = bits1;
+            if (bits2 > basis2_bits)
+                basis2_bits = bits2;
+        }
+    }
+    int product1_bits = ibz_bitsize(&lat1->denom) + basis2_bits;
+    int product2_bits = ibz_bitsize(&lat2->denom) + basis1_bits;
+    int generator_bits = product1_bits > product2_bits ? product1_bits : product2_bits;
+    return product1_bits <= IBZ_BITS - 1 &&
+           product2_bits <= IBZ_BITS - 1 &&
+           ibz_bitsize(&lat1->denom) + ibz_bitsize(&lat2->denom) <= IBZ_BITS - 1 &&
+           2 * generator_bits + 2 <= IBZ_BITS - 1;
+}
+
 /* ========== integer helpers ========== */
 
 /* Quaternion norm bilinear form: <a,b> = a0*b0 + a1*b1 + p*a2*b2 + p*a3*b3 */
@@ -645,7 +670,7 @@ quat_lattice_mul_mlll(quat_lattice_t *res,
         ibz_vec_4_finalize(&generators[i]);
 }
 
-void
+int
 quat_lattice_intersect_mlll(quat_lattice_t *res,
                             const quat_lattice_t *lat1,
                             const quat_lattice_t *lat2,
@@ -657,12 +682,15 @@ quat_lattice_intersect_mlll(quat_lattice_t *res,
      * (paper Remark after lem:latticeinter-bound). Line 14 LLL-reduce output. */
     quat_lattice_t lat1_red, lat2_red;
     quat_lattice_t dual1, dual2, dual_res;
+    quat_lattice_t candidate;
     ibz_mat_4x4_t res_red;
+    int ok = 0;
     quat_lattice_init(&lat1_red);
     quat_lattice_init(&lat2_red);
     quat_lattice_init(&dual1);
     quat_lattice_init(&dual2);
     quat_lattice_init(&dual_res);
+    quat_lattice_init(&candidate);
     ibz_mat_4x4_init(&res_red);
 
     /* Paper lines 5-6: M_k <- LLL(M_k; delta=3/4) */
@@ -686,47 +714,64 @@ quat_lattice_intersect_mlll(quat_lattice_t *res,
     quat_lattice_dual_without_hnf(&dual2, &lat2_red);
     fprintf(stderr, "[IMLLL] L11 add_mlll dual1.basis=%d dual2.basis=%d\n",
         ibz_bitsize(&dual1.basis[0][0]), ibz_bitsize(&dual2.basis[0][0])); fflush(stderr);
-    quat_lattice_add_mlll(&dual_res, &dual1, &dual2, alg);
+    if (!quat_lattice_add_mlll(&dual_res, &dual1, &dual2, alg)) {
+        goto cleanup;
+    }
     fprintf(stderr, "[IMLLL] L11 done basis_max=%d\n",
         ibz_bitsize(&dual_res.basis[0][0])); fflush(stderr);
     fprintf(stderr, "[IMLLL] L12 dual_back\n"); fflush(stderr);
-    quat_lattice_dual_without_hnf(res, &dual_res);
-    fprintf(stderr, "[IMLLL] L12 done basis_max=%d\n", ibz_bitsize(&res->basis[0][0])); fflush(stderr);
+    quat_lattice_dual_without_hnf(&candidate, &dual_res);
+    fprintf(stderr, "[IMLLL] L12 done basis_max=%d\n", ibz_bitsize(&candidate.basis[0][0])); fflush(stderr);
 
     /* Paper line 14: gamma <- LLL(gamma; delta=3/4) */
-    fprintf(stderr, "[IMLLL] L14 final LLL basis_max=%d\n", ibz_bitsize(&res->basis[0][0])); fflush(stderr);
-    quat_lattice_lll(&res_red, res, alg);
-    ibz_mat_4x4_copy(&(res->basis), &res_red);
-    fprintf(stderr, "[IMLLL] L14 done basis_max=%d\n", ibz_bitsize(&res->basis[0][0])); fflush(stderr);
+    fprintf(stderr, "[IMLLL] L14 final LLL basis_max=%d\n", ibz_bitsize(&candidate.basis[0][0])); fflush(stderr);
+    quat_lattice_lll(&res_red, &candidate, alg);
+    ibz_mat_4x4_copy(&candidate.basis, &res_red);
+    fprintf(stderr, "[IMLLL] L14 done basis_max=%d\n", ibz_bitsize(&candidate.basis[0][0])); fflush(stderr);
 
+    /* Publish only after every fallible rank-reduction step succeeded. */
+    ibz_mat_4x4_copy(&res->basis, &candidate.basis);
+    ibz_copy(&res->denom, &candidate.denom);
+    ok = 1;
+
+cleanup:
     ibz_mat_4x4_finalize(&res_red);
     quat_lattice_finalize(&lat1_red);
     quat_lattice_finalize(&lat2_red);
     quat_lattice_finalize(&dual1);
     quat_lattice_finalize(&dual2);
     quat_lattice_finalize(&dual_res);
+    quat_lattice_finalize(&candidate);
+    return ok;
 }
 
-void
-quat_lattice_add_mlll(quat_lattice_t *res,
-                      const quat_lattice_t *lat1,
-                      const quat_lattice_t *lat2,
-                      const quat_alg_t *alg)
+int
+quat_lattice_add_mlll_with_reducer(quat_lattice_t *res,
+                                   const quat_lattice_t *lat1,
+                                   const quat_lattice_t *lat2,
+                                   const quat_alg_t *alg,
+                                   quat_ml2_reducer_t reducer)
 {
     /* paper 03Ideal.tex: "we use the modified LLL algorithm with
      * floating-point arithmetic [NS09], which we call ML2 or modified LLL"
      * "We also call LLL as the special case of MLLL when d=4 in Algorithm ML2"
-     * So paper's MLLL == ML2 (NS09 Fig 9, 53-bit float). Use quat_ml2. */
+     * So paper's MLLL == ML2 (NS09 Fig 9, 53-bit float). Production uses
+     * quat_ml2_retry so a failed ordering is retried by pure permutations. */
     ibz_vec_4_t generators[8];
-    ibz_vec_4_t reduced[8];
+    ibz_vec_4_t reduced[4];
     ibz_mat_4x4_t tmp;
-    (void)alg;
+    quat_lattice_t candidate;
+    int ok = 0;
 
-    for (int i = 0; i < 8; i++) {
+    if (reducer == NULL || !mlll_lattice_add_products_fit(lat1, lat2))
+        return 0;
+
+    for (int i = 0; i < 8; i++)
         ibz_vec_4_init(&generators[i]);
+    for (int i = 0; i < 4; i++)
         ibz_vec_4_init(&reduced[i]);
-    }
     ibz_mat_4x4_init(&tmp);
+    quat_lattice_init(&candidate);
 
     ibz_mat_4x4_scalar_mul(&tmp, &(lat1->denom), &(lat2->basis));
     for (int i = 0; i < 4; i++)
@@ -738,25 +783,36 @@ quat_lattice_add_mlll(quat_lattice_t *res,
         for (int j = 0; j < 4; j++)
             ibz_copy(&(generators[4 + j][i]), &(tmp[i][j]));
 
-    int rho = quat_ml2(reduced, 4, generators, 8, NULL);
-    if (rho >= 4) {
+    int rho = reducer(reduced, 4, generators, 8, alg);
+    if (rho == 4) {
         for (int j = 0; j < 4; j++)
             for (int i = 0; i < 4; i++)
-                ibz_copy(&(res->basis[i][j]), &reduced[j][i]);
-    } else {
-        /* ML2 abort: fall back to identity basis copy from lat1 (safety net,
-         * should not happen with paper-strict ML2). */
-        ibz_mat_4x4_copy(&(res->basis), &lat1->basis);
-        fprintf(stderr, "[ADD-MLLL] ml2 returned rho=%d, lat1 basis copied\n", rho);
-        fflush(stderr);
+                ibz_copy(&candidate.basis[i][j], &reduced[j][i]);
+
+        ibz_mul(&candidate.denom, &lat1->denom, &lat2->denom);
+        quat_lattice_reduce_denom(&candidate, &candidate);
+
+        /* The reducer may fail or return a non-full-rank result. Do not
+         * publish any part of the candidate until rank four is confirmed. */
+        ibz_mat_4x4_copy(&res->basis, &candidate.basis);
+        ibz_copy(&res->denom, &candidate.denom);
+        ok = 1;
     }
 
-    ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
-    quat_lattice_reduce_denom(res, res);
-
+    quat_lattice_finalize(&candidate);
     ibz_mat_4x4_finalize(&tmp);
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 8; i++)
         ibz_vec_4_finalize(&generators[i]);
+    for (int i = 0; i < 4; i++)
         ibz_vec_4_finalize(&reduced[i]);
-    }
+    return ok;
+}
+
+int
+quat_lattice_add_mlll(quat_lattice_t *res,
+                      const quat_lattice_t *lat1,
+                      const quat_lattice_t *lat2,
+                      const quat_alg_t *alg)
+{
+    return quat_lattice_add_mlll_with_reducer(res, lat1, lat2, alg, quat_ml2_retry);
 }
