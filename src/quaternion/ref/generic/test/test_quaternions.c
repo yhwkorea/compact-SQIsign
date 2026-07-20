@@ -49,6 +49,7 @@ main(int argc, char *argv[])
 
     printf("Running quaternion module unit tests\n");
 
+    res = res | ibz_test_mul_sqrt();
     // res = res | ibz_test_intbig();
     // // res = res | mini_gmp_test();
     // res = res | quat_test_finit();

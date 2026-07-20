@@ -143,6 +143,9 @@ int quat_test_input_random_lattice_generation(quat_lattice_t *lattices, int bits
  */
 int ibz_test_intbig(void);
 
+/** @brief Test multiplication and exact/floor integer square roots. */
+int ibz_test_mul_sqrt(void);
+
 /** @brief Test for implementations of GMP functions missing from the mini-GMP API
  *
  * int mpz_legendre(const mpz_t a, const mpz_t p);

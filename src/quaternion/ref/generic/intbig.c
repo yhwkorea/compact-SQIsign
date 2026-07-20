@@ -1481,7 +1481,13 @@ ibz_sqrt(ibz_t *sqrt, const ibz_t *a)
 
     ibz_t x, x_prev, temp;
 
-    ibz_copy(&x, a);
+    /* Start from a power-of-two upper bound on sqrt(a).  Starting from a
+     * itself initially only halves the approximation, so a roughly 2050-bit
+     * level-5 ideal index needs more than the 1000 iterations allowed below
+     * and is falsely reported as a non-square. */
+    const int bits = ibz_bitsize(a);
+    ibz_set(&x, 1);
+    ibz_mul_2exp(&x, &x, (bits + 1) / 2);
 
     // Newton-Raphson: x_new = (x + a/x) / 2
     for (int iter = 0; iter < 1000; iter++) {

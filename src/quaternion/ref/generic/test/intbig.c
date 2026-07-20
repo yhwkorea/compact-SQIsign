@@ -258,6 +258,18 @@ ibz_test_mul_sqrt()
     ibz_sqrt_floor(&d, &m);
     res = res | (0 != ibz_cmp(&d, &c));
 
+#if IBZ_BITS >= 2049
+    // Regression: starting exact Newton iteration from a itself needs more
+    // than 1000 steps for a 2049-bit ideal index.
+    ibz_set(&a, 1);
+    ibz_mul_2exp(&a, &a, 1024);
+    ibz_mul(&m, &a, &a);
+    res = res | !ibz_sqrt(&d, &m);
+    res = res | (0 != ibz_cmp(&d, &a));
+    ibz_add(&m, &m, &ibz_const_one);
+    res = res | ibz_sqrt(&d, &m);
+#endif
+
     if (res) {
         printf("Quaternion module integer group test ibz_test_mul_sqrt failed\n");
     }
