@@ -4,7 +4,10 @@
 #include <id2iso.h>
 #include <inttypes.h>
 #include <locale.h>
+#include <mem.h>
 #include <quaternion.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <tools.h>
 #include <torsion_constants.h>
 
@@ -489,6 +492,8 @@ find_uv(ibz_t *u,
 
 {
 
+    int result = ID2ISO_STATUS_FATAL;
+
     // variable declaration & init
     ibz_vec_4_t vec;
     ibz_t n;
@@ -560,25 +565,7 @@ find_uv(ibz_t *u,
     quat_left_ideal_init(&conj_ideal);
     if (!quat_lideal_conjugate_without_hnf(
             &conj_ideal, &right_order, &reduced_id, Bpoo)) {
-        for (int i = 0; i < num_alternate_order + 1; i++) {
-            ibz_mat_4x4_finalize(&gram[i]);
-            ibz_mat_4x4_finalize(&reduced[i]);
-            quat_left_ideal_finalize(&ideal[i]);
-            ibz_finalize(&adjusted_norm[i]);
-        }
-        ibz_finalize(&n);
-        ibz_vec_4_finalize(&vec);
-        ibz_finalize(&au);
-        ibz_finalize(&bu);
-        ibz_finalize(&av);
-        ibz_finalize(&bv);
-        ibz_finalize(&remain);
-        ibz_finalize(&norm_d);
-        quat_lattice_finalize(&right_order);
-        quat_left_ideal_finalize(&conj_ideal);
-        quat_left_ideal_finalize(&reduced_id);
-        quat_alg_elem_finalize(&delta);
-        return ID2ISO_STATUS_FATAL;
+        goto cleanup;
     }
 
     // computing all the other connecting ideals and reducing them
@@ -589,25 +576,7 @@ find_uv(ibz_t *u,
                 &conj_ideal,
                 &ALTERNATE_CONNECTING_IDEALS[i - 1],
                 Bpoo)) {
-            for (int j = 0; j < num_alternate_order + 1; j++) {
-                ibz_mat_4x4_finalize(&gram[j]);
-                ibz_mat_4x4_finalize(&reduced[j]);
-                quat_left_ideal_finalize(&ideal[j]);
-                ibz_finalize(&adjusted_norm[j]);
-            }
-            ibz_finalize(&n);
-            ibz_vec_4_finalize(&vec);
-            ibz_finalize(&au);
-            ibz_finalize(&bu);
-            ibz_finalize(&av);
-            ibz_finalize(&bv);
-            ibz_finalize(&remain);
-            ibz_finalize(&norm_d);
-            quat_lattice_finalize(&right_order);
-            quat_left_ideal_finalize(&conj_ideal);
-            quat_left_ideal_finalize(&reduced_id);
-            quat_alg_elem_finalize(&delta);
-            return ID2ISO_STATUS_FATAL;
+            goto cleanup;
         }
         ibz_mat_4x4_copy(&reduced[i], &ideal[i].lattice.basis);
         ibz_set(&adjusted_norm[i], 1);
@@ -622,45 +591,76 @@ find_uv(ibz_t *u,
     int m = FINDUV_box_size;
     int m4 = FINDUV_cube_size;
 
-    ibz_vec_4_t small_vecs[num_alternate_order + 1][m4];
-    ibz_t small_norms[num_alternate_order + 1][m4];
-    ibz_vec_4_t alternate_small_vecs[num_alternate_order + 1][m4];
-    ibz_t alternate_small_norms[num_alternate_order + 1][m4];
-    ibz_t quotients[num_alternate_order + 1][m4];
-    int indices[num_alternate_order + 1];
+    /* These tables grow with both the fixed-precision limb count and the
+     * enumeration cube.  Keeping them as VLAs exhausted the default process
+     * stack at levels 3 and 5.  Store the working set on the heap instead;
+     * the two former alternate_* tables were never read. */
+    size_t order_count = (size_t)num_alternate_order + 1;
+    size_t cube_count = (size_t)m4;
+    size_t entry_count;
+
+    if (num_alternate_order < 0 || m4 <= 0 || order_count > SIZE_MAX / cube_count) {
+        goto cleanup;
+    }
+    entry_count = order_count * cube_count;
+    if (entry_count > SIZE_MAX / sizeof(ibz_vec_4_t) ||
+        entry_count > SIZE_MAX / sizeof(ibz_t) ||
+        order_count > SIZE_MAX / sizeof(int) ||
+        cube_count > SIZE_MAX / sizeof(struct vec_and_norm)) {
+        goto cleanup;
+    }
+
+    ibz_vec_4_t *small_vecs = malloc(entry_count * sizeof(*small_vecs));
+    ibz_t *small_norms = malloc(entry_count * sizeof(*small_norms));
+    ibz_t *quotients = malloc(entry_count * sizeof(*quotients));
+    int *indices = malloc(order_count * sizeof(*indices));
+    struct vec_and_norm *small_vecs_and_norms =
+        malloc(cube_count * sizeof(*small_vecs_and_norms));
+
+    if (small_vecs == NULL || small_norms == NULL || quotients == NULL ||
+        indices == NULL || small_vecs_and_norms == NULL) {
+        free(small_vecs_and_norms);
+        free(indices);
+        free(quotients);
+        free(small_norms);
+        free(small_vecs);
+        goto cleanup;
+    }
 
     for (int j = 0; j < num_alternate_order + 1; j++) {
+        size_t row_offset = (size_t)j * cube_count;
+        ibz_vec_4_t *row_vecs = small_vecs + row_offset;
+        ibz_t *row_norms = small_norms + row_offset;
+        ibz_t *row_quotients = quotients + row_offset;
+
         for (int i = 0; i < m4; i++) {
-            ibz_init(&small_norms[j][i]);
-            ibz_vec_4_init(&small_vecs[j][i]);
-            ibz_init(&alternate_small_norms[j][i]);
-            ibz_init(&quotients[j][i]);
-            ibz_vec_4_init(&alternate_small_vecs[j][i]);
+            ibz_init(&row_norms[i]);
+            ibz_vec_4_init(&row_vecs[i]);
+            ibz_init(&row_quotients[i]);
         }
         // enumeration in the hypercube of norm m
-        indices[j] = enumerate_hypercube(small_vecs[j], small_norms[j], m, &gram[j], &adjusted_norm[j]);
+        indices[j] = enumerate_hypercube(row_vecs, row_norms, m, &gram[j], &adjusted_norm[j]);
 
         // sorting the list
         {
-            struct vec_and_norm small_vecs_and_norms[indices[j]];
             for (int i = 0; i < indices[j]; ++i) {
-                memcpy(&small_vecs_and_norms[i].vec, &small_vecs[j][i], sizeof(ibz_vec_4_t));
-                memcpy(&small_vecs_and_norms[i].norm, &small_norms[j][i], sizeof(ibz_t));
+                memcpy(&small_vecs_and_norms[i].vec, &row_vecs[i], sizeof(ibz_vec_4_t));
+                memcpy(&small_vecs_and_norms[i].norm, &row_norms[i], sizeof(ibz_t));
                 small_vecs_and_norms[i].idx = i;
             }
             qsort(small_vecs_and_norms, indices[j], sizeof(*small_vecs_and_norms), compare_vec_by_norm);
             for (int i = 0; i < indices[j]; ++i) {
-                memcpy(&small_vecs[j][i], &small_vecs_and_norms[i].vec, sizeof(ibz_vec_4_t));
-                memcpy(&small_norms[j][i], &small_vecs_and_norms[i].norm, sizeof(ibz_t));
+                memcpy(&row_vecs[i], &small_vecs_and_norms[i].vec, sizeof(ibz_vec_4_t));
+                memcpy(&row_norms[i], &small_vecs_and_norms[i].norm, sizeof(ibz_t));
             }
 #ifndef NDEBUG
             for (int i = 1; i < indices[j]; ++i)
-                assert(ibz_cmp(&small_norms[j][i - 1], &small_norms[j][i]) <= 0);
+                assert(ibz_cmp(&row_norms[i - 1], &row_norms[i]) <= 0);
 #endif
         }
 
         for (int i = 0; i < indices[j]; i++) {
-            ibz_div(&quotients[j][i], &remain, &n, &small_norms[j][i]);
+            ibz_div(&row_quotients[i], &remain, &n, &row_norms[i]);
         }
     }
 
@@ -680,9 +680,9 @@ find_uv(ibz_t *u,
                                        &i1,
                                        &i2,
                                        target,
-                                       small_norms[j1],
-                                       small_norms[j2],
-                                       quotients[j2],
+                                       small_norms + (size_t)j1 * cube_count,
+                                       small_norms + (size_t)j2 * cube_count,
+                                       quotients + (size_t)j2 * cube_count,
                                        indices[j1],
                                        indices[j2],
                                        is_diago,
@@ -693,10 +693,12 @@ find_uv(ibz_t *u,
                 // recording the solutions that we found
                 ibz_copy(&beta1->denom, &ideal[j1].lattice.denom);
                 ibz_copy(&beta2->denom, &ideal[j2].lattice.denom);
-                ibz_copy(d1, &small_norms[j1][i1]);
-                ibz_copy(d2, &small_norms[j2][i2]);
-                ibz_mat_4x4_eval(&beta1->coord, &reduced[j1], &small_vecs[j1][i1]);
-                ibz_mat_4x4_eval(&beta2->coord, &reduced[j2], &small_vecs[j2][i2]);
+                ibz_copy(d1, &small_norms[(size_t)j1 * cube_count + (size_t)i1]);
+                ibz_copy(d2, &small_norms[(size_t)j2 * cube_count + (size_t)i2]);
+                ibz_mat_4x4_eval(
+                    &beta1->coord, &reduced[j1], &small_vecs[(size_t)j1 * cube_count + (size_t)i1]);
+                ibz_mat_4x4_eval(
+                    &beta2->coord, &reduced[j2], &small_vecs[(size_t)j2 * cube_count + (size_t)i2]);
                 assert(quat_lattice_contains(NULL, &ideal[j1].lattice, beta1));
                 assert(quat_lattice_contains(NULL, &ideal[j2].lattice, beta2));
                 if (j1 != 0 || j2 != 0) {
@@ -757,16 +759,24 @@ find_uv(ibz_t *u,
     }
 
     for (int j = 0; j < num_alternate_order + 1; j++) {
+        size_t row_offset = (size_t)j * cube_count;
         for (int i = 0; i < m4; i++) {
-            ibz_finalize(&small_norms[j][i]);
-            ibz_vec_4_finalize(&small_vecs[j][i]);
-            ibz_finalize(&alternate_small_norms[j][i]);
-            ibz_finalize(&quotients[j][i]);
-            ibz_vec_4_finalize(&alternate_small_vecs[j][i]);
+            ibz_finalize(&small_norms[row_offset + (size_t)i]);
+            ibz_vec_4_finalize(&small_vecs[row_offset + (size_t)i]);
+            ibz_finalize(&quotients[row_offset + (size_t)i]);
         }
     }
 
+    sqisign_secure_free(small_vecs_and_norms, cube_count * sizeof(*small_vecs_and_norms));
+    sqisign_secure_free(indices, order_count * sizeof(*indices));
+    sqisign_secure_free(quotients, entry_count * sizeof(*quotients));
+    sqisign_secure_free(small_norms, entry_count * sizeof(*small_norms));
+    sqisign_secure_free(small_vecs, entry_count * sizeof(*small_vecs));
+
+    result = found;
+
     // var finalize
+cleanup:
     for (int i = 0; i < num_alternate_order + 1; i++) {
         ibz_mat_4x4_finalize(&gram[i]);
         ibz_mat_4x4_finalize(&reduced[i]);
@@ -787,7 +797,7 @@ find_uv(ibz_t *u,
     quat_left_ideal_finalize(&reduced_id);
     quat_alg_elem_finalize(&delta);
 
-    return found;
+    return result;
 }
 
 int
