@@ -8,10 +8,11 @@ NIST-developed software is expressly provided "AS IS." NIST MAKES NO WARRANTY OF
 You are solely responsible for determining the appropriateness of using and distributing the software and you assume all risks associated with its use, including but not limited to the risks and costs of program errors, compliance with applicable laws, damage to or loss of data, programs or equipment, and the unavailability or interruption of operation. This software is not intended to be used in any situation where a failure could cause risk of injury or damage to property. The software developed by NIST employees is not subject to copyright protection within the United States.
 */
 
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include <rng.h>
 #include <sig.h>
 #include <api.h>
@@ -26,64 +27,134 @@ You are solely responsible for determining the appropriateness of using and dist
 
 static int      FindMarker(FILE *infile, const char *marker);
 static int      ReadHex(FILE *infile, unsigned char *A, int Length, char *str);
-static int      test_sig_kat(int cnt);
+static int      HexDigit(int ch);
+static int      test_sig_kat(const char *fn_rsp, int cnt, int expected_vectors, int replay);
 
-int main(int argc, char *argv[]) {
-    int rc = 0;
-    int cnt = (argc > 1 ? atoi(argv[1]) : -1);
-    rc = test_sig_kat(cnt);
-    return rc;
+static void usage(const char *program) {
+    fprintf(stderr,
+            "Usage: %s --file response.rsp --mode replay|verify-only "
+            "--expected-vectors N [--count N]\n",
+            program);
 }
 
+int main(int argc, char *argv[]) {
+    const char *fn_rsp = NULL;
+    const char *mode = NULL;
+    int cnt = -1;
+    int expected_vectors = -1;
 
-static int test_sig_kat(int cnt) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
+            fn_rsp = argv[++i];
+        } else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+            mode = argv[++i];
+        } else if (strcmp(argv[i], "--count") == 0 && i + 1 < argc) {
+            char *end = NULL;
+            long parsed;
+            errno = 0;
+            parsed = strtol(argv[++i], &end, 10);
+            if (errno != 0 || end == argv[i] || *end != '\0' ||
+                parsed < 0 || parsed > INT_MAX) {
+                usage(argv[0]);
+                return KAT_DATA_ERROR;
+            }
+            cnt = (int)parsed;
+        } else if (strcmp(argv[i], "--expected-vectors") == 0 && i + 1 < argc) {
+            char *end = NULL;
+            long parsed;
+            errno = 0;
+            parsed = strtol(argv[++i], &end, 10);
+            if (errno != 0 || end == argv[i] || *end != '\0' ||
+                parsed < 1 || parsed > INT_MAX) {
+                usage(argv[0]);
+                return KAT_DATA_ERROR;
+            }
+            expected_vectors = (int)parsed;
+        } else if (strcmp(argv[i], "--help") == 0) {
+            usage(argv[0]);
+            return KAT_SUCCESS;
+        } else {
+            usage(argv[0]);
+            return KAT_DATA_ERROR;
+        }
+    }
+
+    if (fn_rsp == NULL || mode == NULL || expected_vectors < 1 ||
+        (strcmp(mode, "replay") != 0 && strcmp(mode, "verify-only") != 0)) {
+        usage(argv[0]);
+        return KAT_DATA_ERROR;
+    }
+
+#if !defined(ENABLE_SIGN)
+    if (strcmp(mode, "replay") == 0) {
+        fprintf(stderr, "replay mode requires ENABLE_SIGN\n");
+        return KAT_DATA_ERROR;
+    }
+#endif
+
+    return test_sig_kat(fn_rsp, cnt, expected_vectors,
+                        strcmp(mode, "replay") == 0);
+}
+
+static int test_sig_kat(const char *fn_rsp, int cnt, int expected_vectors, int replay) {
 #if defined(ENABLE_SIGN)
     unsigned char       seed[48];
     unsigned char       sk[CRYPTO_SECRETKEYBYTES];
     unsigned char       pk[CRYPTO_PUBLICKEYBYTES];
     unsigned char       sk_rsp[CRYPTO_SECRETKEYBYTES];
     unsigned char       *sm;
+    unsigned long long  smlen;
 #endif
     unsigned char       pk_rsp[CRYPTO_PUBLICKEYBYTES];
     unsigned char       *m, *m1, *sm_rsp;
-    unsigned long long  mlen, smlen, mlen1;
+    unsigned long long  mlen, smlen_rsp, mlen1;
     int                 count;
-    int                 done;
     int                 ret_val;
+    int                 tested = 0;
 
-    char                fn_rsp[64];
     FILE                *fp_rsp;
 
-    sprintf(fn_rsp, "../../KAT/PQCsignKAT_%d_%s.rsp", CRYPTO_SECRETKEYBYTES, CRYPTO_ALGNAME);
     if ( (fp_rsp = fopen(fn_rsp, "r")) == NULL ) {
         printf("Couldn't open <%s> for read\n", fn_rsp);
         return KAT_FILE_OPEN_ERROR;
     }
 
-    done = 0;
-    do {
-
+    while (1) {
         if ( FindMarker(fp_rsp, "count = ") ) {
-            ret_val = fscanf(fp_rsp, "%d", &count);
+            if (fscanf(fp_rsp, "%d", &count) != 1) {
+                return KAT_DATA_ERROR;
+            }
         } else {
-            done = 1;
+            if (ferror(fp_rsp)) {
+                return KAT_DATA_ERROR;
+            }
             break;
         }
 
-        if (cnt != -1 && cnt != count)
-            continue;
-
-#if defined(ENABLE_SIGN)
-        if ( !ReadHex(fp_rsp, seed, 48, "seed = ") ) {
-            printf("ERROR: unable to read 'seed' from <%s>\n", fn_rsp);
+        if (cnt == -1 && count != tested) {
+            printf("ERROR: non-contiguous KAT count <%d> in <%s>\n", count, fn_rsp);
             return KAT_DATA_ERROR;
         }
+        if (cnt != -1 && cnt != count)
+            continue;
+        tested++;
 
-        randombytes_init(seed, NULL, 256);
+#if defined(ENABLE_SIGN)
+        if (replay) {
+            if ( !ReadHex(fp_rsp, seed, 48, "seed = ") ) {
+                printf("ERROR: unable to read 'seed' from <%s>\n", fn_rsp);
+                return KAT_DATA_ERROR;
+            }
+
+            randombytes_init(seed, NULL, 256);
+        }
 #endif
 
         if ( FindMarker(fp_rsp, "mlen = ") ) {
-            ret_val = fscanf(fp_rsp, "%lld", &mlen);
+            if (fscanf(fp_rsp, "%llu", &mlen) != 1 ||
+                mlen == 0 || mlen > INT_MAX) {
+                return KAT_DATA_ERROR;
+            }
         } else {
             printf("ERROR: unable to read 'mlen' from <%s>\n", fn_rsp);
             return KAT_DATA_ERROR;
@@ -94,7 +165,13 @@ static int test_sig_kat(int cnt) {
 #if defined(ENABLE_SIGN)
         sm = (unsigned char *)calloc(mlen + CRYPTO_BYTES, sizeof(unsigned char));
 #endif
-        sm_rsp = (unsigned char *)calloc(mlen + CRYPTO_BYTES, sizeof(unsigned char));
+        if (m == NULL || m1 == NULL
+#if defined(ENABLE_SIGN)
+            || sm == NULL
+#endif
+        ) {
+            return KAT_DATA_ERROR;
+        }
 
         if ( !ReadHex(fp_rsp, m, (int)mlen, "msg = ") ) {
             printf("ERROR: unable to read 'msg' from <%s>\n", fn_rsp);
@@ -102,10 +179,12 @@ static int test_sig_kat(int cnt) {
         }
 
 #if defined(ENABLE_SIGN)
-        // Generate the public/private keypair
-        if ( (ret_val = sqisign_keypair(pk, sk)) != 0) {
-            printf("crypto_sign_keypair returned <%d>\n", ret_val);
-            return KAT_CRYPTO_FAILURE;
+        if (replay) {
+            // Generate the public/private keypair
+            if ( (ret_val = sqisign_keypair(pk, sk)) != 0) {
+                printf("crypto_sign_keypair returned <%d>\n", ret_val);
+                return KAT_CRYPTO_FAILURE;
+            }
         }
 #endif
 
@@ -115,61 +194,70 @@ static int test_sig_kat(int cnt) {
         }
 
 #if defined(ENABLE_SIGN)
-        if ( !ReadHex(fp_rsp, sk_rsp, CRYPTO_SECRETKEYBYTES, "sk = ") ) {
-            printf("ERROR: unable to read 'sk' from <%s>\n", fn_rsp);
-            return KAT_DATA_ERROR;
-        }
+        if (replay) {
+            if ( !ReadHex(fp_rsp, sk_rsp, CRYPTO_SECRETKEYBYTES, "sk = ") ) {
+                printf("ERROR: unable to read 'sk' from <%s>\n", fn_rsp);
+                return KAT_DATA_ERROR;
+            }
 
-        if (memcmp(pk, pk_rsp, CRYPTO_PUBLICKEYBYTES) != 0) {
-            printf("ERROR: pk is different from <%s>\n", fn_rsp);
-            return KAT_VERIFICATION_ERROR;
-        }
+            if (memcmp(pk, pk_rsp, CRYPTO_PUBLICKEYBYTES) != 0) {
+                printf("ERROR: pk is different from <%s>\n", fn_rsp);
+                return KAT_VERIFICATION_ERROR;
+            }
 
-        if (memcmp(sk, sk_rsp, CRYPTO_SECRETKEYBYTES) != 0) {
-            printf("ERROR: sk is different from <%s>\n", fn_rsp);
-            return KAT_VERIFICATION_ERROR;
-        }
+            if (memcmp(sk, sk_rsp, CRYPTO_SECRETKEYBYTES) != 0) {
+                printf("ERROR: sk is different from <%s>\n", fn_rsp);
+                return KAT_VERIFICATION_ERROR;
+            }
 
-        if ( (ret_val = sqisign_sign(sm, &smlen, m, mlen, sk)) != 0) {
-            printf("crypto_sign returned <%d>\n", ret_val);
-            return KAT_CRYPTO_FAILURE;
+            if ( (ret_val = sqisign_sign(sm, &smlen, m, mlen, sk)) != 0) {
+                printf("crypto_sign returned <%d>\n", ret_val);
+                return KAT_CRYPTO_FAILURE;
+            }
         }
+#endif
 
-        if ( !ReadHex(fp_rsp, sm_rsp, smlen, "sm = ") ) {
-            printf("ERROR: unable to read 'sm' from <%s>\n", fn_rsp);
-            return KAT_DATA_ERROR;
-        }
-
-        if (memcmp(sm, sm_rsp, smlen) != 0) {
-            printf("ERROR: sm is different from <%s>\n", fn_rsp);
-            return KAT_VERIFICATION_ERROR;
-        }
-
-        if ( (ret_val = sqisign_open(m1, &mlen1, sm, smlen, pk)) != 0) {
-            printf("crypto_sign_open returned <%d>\n", ret_val);
-            return KAT_CRYPTO_FAILURE;
-        }
-#else
         if ( FindMarker(fp_rsp, "smlen = ") ) {
-            ret_val = fscanf(fp_rsp, "%llu", &smlen);
+            if (fscanf(fp_rsp, "%llu", &smlen_rsp) != 1 ||
+                smlen_rsp != mlen + CRYPTO_BYTES || smlen_rsp > INT_MAX) {
+                return KAT_DATA_ERROR;
+            }
         } else {
             printf("ERROR: unable to read 'smlen' from <%s>\n", fn_rsp);
             return KAT_DATA_ERROR;
         }
+        sm_rsp = (unsigned char *)calloc(smlen_rsp, sizeof(unsigned char));
+        if (sm_rsp == NULL) {
+            return KAT_DATA_ERROR;
+        }
 
-        if ( !ReadHex(fp_rsp, sm_rsp, smlen, "sm = ") ) {
+        if ( !ReadHex(fp_rsp, sm_rsp, (int)smlen_rsp, "sm = ") ) {
             printf("ERROR: unable to read 'sm' from <%s>\n", fn_rsp);
             return KAT_DATA_ERROR;
         }
 
-        if ( (ret_val = sqisign_open(m1, &mlen1, sm_rsp, smlen, pk_rsp)) != 0 ) {
-            printf("crypto_sign_open returned <%d>\n", ret_val);
-            return KAT_CRYPTO_FAILURE;
-        }
+#if defined(ENABLE_SIGN)
+        if (replay) {
+            if (smlen != smlen_rsp || memcmp(sm, sm_rsp, smlen) != 0) {
+                printf("ERROR: sm is different from <%s>\n", fn_rsp);
+                return KAT_VERIFICATION_ERROR;
+            }
+
+            if ( (ret_val = sqisign_open(m1, &mlen1, sm, smlen, pk)) != 0) {
+                printf("crypto_sign_open returned <%d>\n", ret_val);
+                return KAT_CRYPTO_FAILURE;
+            }
+        } else
 #endif
+        {
+            if ( (ret_val = sqisign_open(m1, &mlen1, sm_rsp, smlen_rsp, pk_rsp)) != 0 ) {
+                printf("crypto_sign_open returned <%d>\n", ret_val);
+                return KAT_CRYPTO_FAILURE;
+            }
+        }
 
         if ( mlen != mlen1 ) {
-            printf("crypto_sign_open returned bad 'mlen': Got <%lld>, expected <%lld>\n", mlen1, mlen);
+            printf("crypto_sign_open returned bad 'mlen': Got <%llu>, expected <%llu>\n", mlen1, mlen);
             return KAT_CRYPTO_FAILURE;
         }
 
@@ -185,11 +273,18 @@ static int test_sig_kat(int cnt) {
 #endif
         free(sm_rsp);
 
-    } while ( !done );
+    }
 
     fclose(fp_rsp);
 
-    printf("Known Answer Tests PASSED. \n");
+    if (tested != expected_vectors) {
+        printf("ERROR: found %d KAT vector%s in <%s>, expected %d\n",
+               tested, tested == 1 ? "" : "s", fn_rsp, expected_vectors);
+        return KAT_DATA_ERROR;
+    }
+
+    printf("Known Answer Tests PASSED (%s, %d vector%s).\n",
+           replay ? "replay" : "verify-only", tested, tested == 1 ? "" : "s");
     printf("\n\n");
 
     return KAT_SUCCESS;
@@ -244,46 +339,38 @@ FindMarker(FILE *infile, const char *marker) {
 //
 static int
 ReadHex(FILE *infile, unsigned char *A, int Length, char *str) {
-    int         i, ch, started;
-    unsigned char   ich;
+    int ch;
 
-    if ( Length == 0 ) {
-        A[0] = 0x00;
-        return 1;
-    }
-    memset(A, 0x00, Length);
-    started = 0;
-    if ( FindMarker(infile, str) )
-        while ( (ch = fgetc(infile)) != EOF ) {
-            if ( !isxdigit(ch) ) {
-                if ( !started ) {
-                    if ( ch == '\n' ) {
-                        break;
-                    } else {
-                        continue;
-                    }
-                } else {
-                    break;
-                }
-            }
-            started = 1;
-            if ( (ch >= '0') && (ch <= '9') ) {
-                ich = ch - '0';
-            } else if ( (ch >= 'A') && (ch <= 'F') ) {
-                ich = ch - 'A' + 10;
-            } else if ( (ch >= 'a') && (ch <= 'f') ) {
-                ich = ch - 'a' + 10;
-            } else { // shouldn't ever get here
-                ich = 0;
-            }
-
-            for ( i = 0; i < Length - 1; i++ ) {
-                A[i] = (A[i] << 4) | (A[i + 1] >> 4);
-            }
-            A[Length - 1] = (A[Length - 1] << 4) | ich;
-        } else {
+    if (Length <= 0 || !FindMarker(infile, str)) {
         return 0;
     }
 
-    return 1;
+    for (int i = 0; i < Length; i++) {
+        int high = HexDigit(fgetc(infile));
+        int low = HexDigit(fgetc(infile));
+        if (high < 0 || low < 0) {
+            return 0;
+        }
+        A[i] = (unsigned char)((high << 4) | low);
+    }
+
+    ch = fgetc(infile);
+    if (ch == '\r') {
+        ch = fgetc(infile);
+    }
+    return ch == '\n';
+}
+
+static int
+HexDigit(int ch) {
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return ch - 'A' + 10;
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return ch - 'a' + 10;
+    }
+    return -1;
 }

@@ -25,7 +25,7 @@ Concretely:
 Verify itself runs on the EC side and does not pay the 222-limb LLL cost,
 so it is fast even at lvl5. We measure it from precomputed KAT data —
 specifically the `(pk, m, sm)` triple stored at `count = 0` of the upstream
-NIST KAT file `KAT/PQCsignKAT_701_SQIsign_lvl5.rsp` shipped with the
+NIST KAT file `KAT/legacy-nist-v2/PQCsignKAT_701_SQIsign_lvl5.rsp` shipped with the
 KLKL25 baseline. A small `apps/benchmark_verify_from_kat.c` driver opens
 that KAT entry, reads `(pk, m, sm)` directly, and times
 `crypto_sign_open` 20 times. KeyGen and Sign are skipped entirely.

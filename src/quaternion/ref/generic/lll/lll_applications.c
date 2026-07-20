@@ -141,9 +141,12 @@ quat_lideal_prime_norm_reduced_equivalent(quat_left_ideal_t *lideal,
             ibz_mul(&new_alpha.denom, &new_alpha.denom, &lideal->norm);
             fprintf(stderr, "[PNRE] calling lideal_mul ctr=%d\n", ctr); fflush(stderr);
             quat_lideal_mul(lideal, lideal, &new_alpha, alg);
-            fprintf(stderr, "[PNRE] lideal_mul returned; checking primality...\n"); fflush(stderr);
-            assert(ibz_probab_prime(&lideal->norm, primality_num_iter));
-            fprintf(stderr, "[PNRE] primality check passed; found=1\n"); fflush(stderr);
+            /* tmp was accepted as prime above and becomes the norm of the
+             * equivalent ideal.  Re-running the randomized primality test in
+             * an assert consumed the application DRBG only in Debug builds,
+             * making KAT output depend on NDEBUG. */
+            assert(ibz_cmp(&lideal->norm, &tmp) == 0);
+            fprintf(stderr, "[PNRE] lideal_mul returned; norm preserved; found=1\n"); fflush(stderr);
 
             found = 1;
             break;

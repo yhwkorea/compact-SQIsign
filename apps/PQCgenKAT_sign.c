@@ -32,7 +32,7 @@ protection within the United States.
 
 #include "api.h"
 #include "rng.h"
-#include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,13 +43,36 @@ protection within the United States.
 #define KAT_FILE_OPEN_ERROR -1
 #define KAT_DATA_ERROR -3
 #define KAT_CRYPTO_FAILURE -4
+#define KAT_MAX_VECTORS 100
+#define KAT_PATH_MAX 4096
 
 int FindMarker(FILE *infile, const char *marker);
 int ReadHex(FILE *infile, unsigned char *A, int Length, char *str);
+int HexDigit(int ch);
 void fprintBstr(FILE *fp, char *S, unsigned char *A, unsigned long long L);
 
-int main(void) {
-  char fn_req[32], fn_rsp[32];
+static void usage(const char *program) {
+  fprintf(stderr,
+          "Usage: %s [--vectors 1..%d] [--output-dir directory]\n",
+          program, KAT_MAX_VECTORS);
+}
+
+static int parse_vector_count(const char *value, int *vectors) {
+  char *end = NULL;
+  long parsed;
+
+  errno = 0;
+  parsed = strtol(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || parsed < 1 ||
+      parsed > KAT_MAX_VECTORS) {
+    return 0;
+  }
+  *vectors = (int)parsed;
+  return 1;
+}
+
+int main(int argc, char **argv) {
+  char fn_req[KAT_PATH_MAX], fn_rsp[KAT_PATH_MAX];
   FILE *fp_req, *fp_rsp;
   unsigned char seed[48];
   unsigned char msg[3300];
@@ -58,20 +81,50 @@ int main(void) {
   unsigned long long mlen, smlen, mlen1;
   int count;
   int done;
+  int processed = 0;
   unsigned char pk[CRYPTO_PUBLICKEYBYTES], sk[CRYPTO_SECRETKEYBYTES];
   int ret_val;
+  int vectors = KAT_MAX_VECTORS;
+  const char *output_dir = ".";
+
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--vectors") == 0 && i + 1 < argc) {
+      if (!parse_vector_count(argv[++i], &vectors)) {
+        usage(argv[0]);
+        return KAT_DATA_ERROR;
+      }
+    } else if (strcmp(argv[i], "--output-dir") == 0 && i + 1 < argc) {
+      output_dir = argv[++i];
+    } else if (strcmp(argv[i], "--help") == 0) {
+      usage(argv[0]);
+      return KAT_SUCCESS;
+    } else {
+      usage(argv[0]);
+      return KAT_DATA_ERROR;
+    }
+  }
 
   // Create the REQUEST file
-  sprintf(fn_req, "PQCsignKAT_%d_%s.req", CRYPTO_SECRETKEYBYTES,
-          CRYPTO_ALGNAME);
+  ret_val = snprintf(fn_req, sizeof(fn_req), "%s/PQCsignKAT_%d_%s.req",
+                     output_dir, CRYPTO_SECRETKEYBYTES, CRYPTO_ALGNAME);
+  if (ret_val < 0 || (size_t)ret_val >= sizeof(fn_req)) {
+    fprintf(stderr, "KAT request path is too long\n");
+    return KAT_FILE_OPEN_ERROR;
+  }
   if ((fp_req = fopen(fn_req, "w")) == NULL) {
     printf("Couldn't open <%s> for write\n", fn_req);
     return KAT_FILE_OPEN_ERROR;
   }
-  sprintf(fn_rsp, "PQCsignKAT_%d_%s.rsp", CRYPTO_SECRETKEYBYTES,
-          CRYPTO_ALGNAME);
+  ret_val = snprintf(fn_rsp, sizeof(fn_rsp), "%s/PQCsignKAT_%d_%s.rsp",
+                     output_dir, CRYPTO_SECRETKEYBYTES, CRYPTO_ALGNAME);
+  if (ret_val < 0 || (size_t)ret_val >= sizeof(fn_rsp)) {
+    fprintf(stderr, "KAT response path is too long\n");
+    fclose(fp_req);
+    return KAT_FILE_OPEN_ERROR;
+  }
   if ((fp_rsp = fopen(fn_rsp, "w")) == NULL) {
     printf("Couldn't open <%s> for write\n", fn_rsp);
+    fclose(fp_req);
     return KAT_FILE_OPEN_ERROR;
   }
 
@@ -79,24 +132,41 @@ int main(void) {
     entropy_input[i] = i;
 
   randombytes_init(entropy_input, NULL, 256);
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < vectors; i++) {
     fprintf(fp_req, "count = %d\n", i);
-    randombytes(seed, 48);
+    if (randombytes(seed, 48) != 0) {
+      fclose(fp_req);
+      fclose(fp_rsp);
+      return KAT_CRYPTO_FAILURE;
+    }
     fprintBstr(fp_req, "seed = ", seed, 48);
     mlen = 33 * (i + 1);
     fprintf(fp_req, "mlen = %llu\n", mlen);
-    randombytes(msg, mlen);
+    if (randombytes(msg, mlen) != 0) {
+      fclose(fp_req);
+      fclose(fp_rsp);
+      return KAT_CRYPTO_FAILURE;
+    }
     fprintBstr(fp_req, "msg = ", msg, mlen);
     fprintf(fp_req, "pk =\n");
     fprintf(fp_req, "sk =\n");
     fprintf(fp_req, "smlen =\n");
-    fprintf(fp_req, "sm =\n\n");
+    fprintf(fp_req, "sm =\n");
+    if (i + 1 < vectors) {
+      fprintf(fp_req, "\n");
+    }
   }
-  fclose(fp_req);
+  ret_val = ferror(fp_req);
+  if (fclose(fp_req) != 0 || ret_val) {
+    printf("Couldn't finish writing <%s>\n", fn_req);
+    fclose(fp_rsp);
+    return KAT_FILE_OPEN_ERROR;
+  }
 
   // Create the RESPONSE file based on what's in the REQUEST file
   if ((fp_req = fopen(fn_req, "r")) == NULL) {
     printf("Couldn't open <%s> for read\n", fn_req);
+    fclose(fp_rsp);
     return KAT_FILE_OPEN_ERROR;
   }
 
@@ -104,7 +174,7 @@ int main(void) {
   done = 0;
   do {
     if (FindMarker(fp_req, "count = ")) {
-      if (fscanf(fp_req, "%d", &count) != 1)
+      if (fscanf(fp_req, "%d", &count) != 1 || count != processed)
         return KAT_DATA_ERROR;
     } else {
       done = 1;
@@ -121,7 +191,8 @@ int main(void) {
     randombytes_init(seed, NULL, 256);
 
     if (FindMarker(fp_req, "mlen = ")) {
-      if (fscanf(fp_req, "%llu", &mlen) != 1)
+      if (fscanf(fp_req, "%llu", &mlen) != 1 || mlen == 0 ||
+          mlen > sizeof(msg))
         return KAT_DATA_ERROR;
     } else {
       printf("ERROR: unable to read 'mlen' from <%s>\n", fn_req);
@@ -132,6 +203,12 @@ int main(void) {
     m = (unsigned char *)calloc(mlen, sizeof(unsigned char));
     m1 = (unsigned char *)calloc(mlen + CRYPTO_BYTES, sizeof(unsigned char));
     sm = (unsigned char *)calloc(mlen + CRYPTO_BYTES, sizeof(unsigned char));
+    if (m == NULL || m1 == NULL || sm == NULL) {
+      free(m);
+      free(m1);
+      free(sm);
+      return KAT_CRYPTO_FAILURE;
+    }
 
     if (!ReadHex(fp_req, m, (int)mlen, "msg = ")) {
       printf("ERROR: unable to read 'msg' from <%s>\n", fn_req);
@@ -153,7 +230,9 @@ int main(void) {
     }
     fprintf(fp_rsp, "smlen = %llu\n", smlen);
     fprintBstr(fp_rsp, "sm = ", sm, smlen);
-    fprintf(fp_rsp, "\n");
+    if (count + 1 < vectors) {
+      fprintf(fp_rsp, "\n");
+    }
 
     if ((ret_val = crypto_sign_open(m1, &mlen1, sm, smlen, pk)) != 0) {
       printf("crypto_sign_open returned <%d>\n", ret_val);
@@ -175,11 +254,25 @@ int main(void) {
     free(m);
     free(m1);
     free(sm);
+    processed++;
 
   } while (!done);
 
-  fclose(fp_req);
-  fclose(fp_rsp);
+  if (processed != vectors || ferror(fp_req)) {
+    fclose(fp_req);
+    fclose(fp_rsp);
+    return KAT_DATA_ERROR;
+  }
+
+  int req_read_error = ferror(fp_req);
+  int rsp_write_error = ferror(fp_rsp);
+  int req_close_error = fclose(fp_req);
+  int rsp_close_error = fclose(fp_rsp);
+  if (req_read_error || rsp_write_error || req_close_error != 0 ||
+      rsp_close_error != 0) {
+    printf("Couldn't finish KAT file generation\n");
+    return KAT_FILE_OPEN_ERROR;
+  }
 
   return KAT_SUCCESS;
 }
@@ -225,44 +318,39 @@ int FindMarker(FILE *infile, const char *marker) {
 // ALLOW TO READ HEXADECIMAL ENTRY (KEYS, DATA, TEXT, etc.)
 //
 int ReadHex(FILE *infile, unsigned char *A, int Length, char *str) {
-  int i, ch, started;
-  unsigned char ich;
+  int ch;
 
-  if (Length == 0) {
-    A[0] = 0x00;
-    return 1;
-  }
-  memset(A, 0x00, Length);
-  started = 0;
-  if (FindMarker(infile, str))
-    while ((ch = fgetc(infile)) != EOF) {
-      if (!isxdigit(ch)) {
-        if (!started) {
-          if (ch == '\n')
-            break;
-          else
-            continue;
-        } else
-          break;
-      }
-      started = 1;
-      if ((ch >= '0') && (ch <= '9'))
-        ich = ch - '0';
-      else if ((ch >= 'A') && (ch <= 'F'))
-        ich = ch - 'A' + 10;
-      else if ((ch >= 'a') && (ch <= 'f'))
-        ich = ch - 'a' + 10;
-      else // shouldn't ever get here
-        ich = 0;
-
-      for (i = 0; i < Length - 1; i++)
-        A[i] = (A[i] << 4) | (A[i + 1] >> 4);
-      A[Length - 1] = (A[Length - 1] << 4) | ich;
-    }
-  else
+  if (Length <= 0 || !FindMarker(infile, str)) {
     return 0;
+  }
 
-  return 1;
+  for (int i = 0; i < Length; i++) {
+    int high = HexDigit(fgetc(infile));
+    int low = HexDigit(fgetc(infile));
+    if (high < 0 || low < 0) {
+      return 0;
+    }
+    A[i] = (unsigned char)((high << 4) | low);
+  }
+
+  ch = fgetc(infile);
+  if (ch == '\r') {
+    ch = fgetc(infile);
+  }
+  return ch == '\n';
+}
+
+int HexDigit(int ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ch - '0';
+  }
+  if (ch >= 'A' && ch <= 'F') {
+    return ch - 'A' + 10;
+  }
+  if (ch >= 'a' && ch <= 'f') {
+    return ch - 'a' + 10;
+  }
+  return -1;
 }
 
 void fprintBstr(FILE *fp, char *S, unsigned char *A, unsigned long long L) {

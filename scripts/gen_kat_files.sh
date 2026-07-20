@@ -1,16 +1,47 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-echo 'Running Script for Level 1...' 
-./build/apps/PQCgenKAT_sign_lvl1
-mv PQCsignKAT_353_SQIsign_lvl1.req ./KAT/PQCsignKAT_353_SQIsign_lvl1.req
-mv PQCsignKAT_353_SQIsign_lvl1.rsp ./KAT/PQCsignKAT_353_SQIsign_lvl1.rsp
+set -euo pipefail
 
-echo 'Running Script for Level 3...' 
-./build/apps/PQCgenKAT_sign_lvl3
-mv PQCsignKAT_529_SQIsign_lvl3.req ./KAT/PQCsignKAT_529_SQIsign_lvl3.req
-mv PQCsignKAT_529_SQIsign_lvl3.rsp ./KAT/PQCsignKAT_529_SQIsign_lvl3.rsp
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+build_dir=${1:-"${repo_root}/build"}
+output_dir=${2:-"${repo_root}/KAT/compact-v1"}
+vectors=${KAT_VECTORS:-1}
 
-echo 'Running Script for Level 5...' 
-./build/apps/PQCgenKAT_sign_lvl5
-mv PQCsignKAT_701_SQIsign_lvl5.req ./KAT/PQCsignKAT_701_SQIsign_lvl5.req
-mv PQCsignKAT_701_SQIsign_lvl5.rsp ./KAT/PQCsignKAT_701_SQIsign_lvl5.rsp
+case ${build_dir} in
+    /*) ;;
+    *) build_dir="$(pwd)/${build_dir}" ;;
+esac
+case ${output_dir} in
+    /*) ;;
+    *) output_dir="$(pwd)/${output_dir}" ;;
+esac
+
+kat_tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/compact-sqisign-kat.XXXXXX")
+publish_tmp_dir=
+cleanup() {
+    rm -rf -- "${kat_tmp_dir}"
+    if [[ -n ${publish_tmp_dir} ]]; then
+        rm -rf -- "${publish_tmp_dir}"
+    fi
+}
+trap cleanup EXIT
+
+for level in lvl1 lvl3 lvl5; do
+    echo "Generating ${vectors} Compact-SQIsign KAT vector(s) for ${level}..."
+    "${build_dir}/apps/PQCgenKAT_sign_${level}" \
+        --vectors "${vectors}" --output-dir "${kat_tmp_dir}"
+done
+
+mkdir -p "${output_dir}"
+publish_tmp_dir=$(mktemp -d "${output_dir}/.publish.XXXXXX")
+for generated_file in "${kat_tmp_dir}"/*.req "${kat_tmp_dir}"/*.rsp; do
+    install -m 0644 "${generated_file}" \
+        "${publish_tmp_dir}/$(basename -- "${generated_file}")"
+done
+for staged_file in "${publish_tmp_dir}"/*; do
+    mv -f "${staged_file}" "${output_dir}/$(basename -- "${staged_file}")"
+done
+rmdir "${publish_tmp_dir}"
+publish_tmp_dir=
+
+echo "Installed Compact-SQIsign KAT files in ${output_dir}"

@@ -730,6 +730,41 @@ err:
 }
 
 int
+ibz_test_rand_interval_endpoints(void)
+{
+    unsigned char seed[48] = { 0 };
+    ibz_t low, high, sample;
+    int saw_low = 0;
+    int saw_high = 0;
+    int res = 0;
+
+    ibz_init(&low);
+    ibz_init(&high);
+    ibz_init(&sample);
+    ibz_set(&low, 0);
+    ibz_set(&high, 1);
+
+    randombytes_init(seed, NULL, 256);
+    for (int i = 0; i < 64 && !(saw_low && saw_high); i++) {
+        if (!ibz_rand_interval(&sample, &low, &high)) {
+            res = 1;
+            break;
+        }
+        saw_low |= ibz_cmp(&sample, &low) == 0;
+        saw_high |= ibz_cmp(&sample, &high) == 0;
+    }
+    res |= !(saw_low && saw_high);
+
+    if (res) {
+        printf("Quaternion module integer test ibz_test_rand_interval_endpoints failed\n");
+    }
+    ibz_finalize(&low);
+    ibz_finalize(&high);
+    ibz_finalize(&sample);
+    return res;
+}
+
+int
 ibz_test_rand_interval_i(int reps)
 {
     int res = 0;

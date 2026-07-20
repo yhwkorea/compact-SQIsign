@@ -61,9 +61,16 @@ ctest --output-on-failure
 
 The test harness covers:
 
-- `SQIsign_<level>_KAT` — checks against the KAT files in `KAT/`.
-- `SQIsign_<level>_SELFTEST` — random self-tests (KeyGen + Sign + Verify).
+- `sqisign_<level>_KAT_LEGACY_VERIFY` — verifies all 100 published
+  SQIsign NIST-v2 signatures.
+- `sqisign_<level>_KAT_COMPACT_VERIFY` — verifies the fixed-precision
+  Compact-SQIsign vector.
+- `sqisign_<level>_KAT_COMPACT_REPLAY_KAT` — regenerates and compares the
+  Compact-SQIsign key pair and signature byte-for-byte.
+- `sqisign_<level>_SELFTEST` — random self-tests (KeyGen + Sign + Verify).
 - Sub-library unit tests for `mp`, `gf`, `ec`, `quaternion`, `hd`, `id2iso`.
+
+See [`KAT/README.md`](KAT/README.md) for vector provenance and regeneration.
 
 `ctest --timeout <seconds>` overrides the default 1500 s per-test cap (raise it
 for level 5).

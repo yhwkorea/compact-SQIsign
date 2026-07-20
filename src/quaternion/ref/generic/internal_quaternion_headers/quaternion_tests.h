@@ -146,6 +146,9 @@ int ibz_test_intbig(void);
 /** @brief Test multiplication and exact/floor integer square roots. */
 int ibz_test_mul_sqrt(void);
 
+/** @brief Test that both endpoints of ibz_rand_interval's [a, b] range occur. */
+int ibz_test_rand_interval_endpoints(void);
+
 /** @brief Test for implementations of GMP functions missing from the mini-GMP API
  *
  * int mpz_legendre(const mpz_t a, const mpz_t p);

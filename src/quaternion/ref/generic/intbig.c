@@ -784,7 +784,9 @@ ibz_rand_interval(ibz_t *rand, const ibz_t *a, const ibz_t *b)
             (*rand)[len_limbs - 1] &= mask;
         }
 
-        if (ibz_cmp(rand, &range) < 0) {
+        /* range = b - a, so accepting range itself is required for the
+         * documented inclusive interval [a, b]. */
+        if (ibz_cmp(rand, &range) <= 0) {
             ibz_add(rand, rand, a);
             return 1;
         }
