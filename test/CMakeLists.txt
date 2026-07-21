@@ -41,7 +41,9 @@ FOREACH(SVARIANT ${SVARIANT_S})
     if (ENABLE_SIGN)
 
         add_executable(sqisign_test_scheme_${SVARIANT} test_sqisign.c)
-        target_link_libraries(sqisign_test_scheme_${SVARIANT} sqisign_${SVARIANT_LOWER})
+        # Use the deterministic test RNG so --seed is reproducible.  The
+        # separate thread-safety tests deliberately link the system RNG.
+        target_link_libraries(sqisign_test_scheme_${SVARIANT} sqisign_${SVARIANT_LOWER}_test)
         target_include_directories(sqisign_test_scheme_${SVARIANT} PUBLIC ${PROJECT_SOURCE_DIR}/src/common ${INC_PUBLIC} ${PROJECT_SOURCE_DIR}/src/nistapi/${SVARIANT_LOWER})
         add_test(NAME sqisign_${SVARIANT}_CORRECTNESS
             COMMAND sqisign_test_scheme_${SVARIANT} --seed=1 --msglen=33)

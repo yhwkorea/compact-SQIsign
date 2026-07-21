@@ -20,6 +20,7 @@ main(int argc, char *argv[])
     int seed_set = 0;
     int res = 0;
     uint32_t ml2_stress_samples = 0;
+    int ml2_correctness_only = 0;
 
     for (int i = 1; i < argc; i++) {
         if (!help && strcmp(argv[i], "--help") == 0) {
@@ -41,6 +42,11 @@ main(int argc, char *argv[])
             continue;
         }
 
+        if (strcmp(argv[i], "--ml2-correctness-only") == 0) {
+            ml2_correctness_only = 1;
+            continue;
+        }
+
         if (!seed_set && !parse_seed(argv[i], seed)) {
             seed_set = 1;
             continue;
@@ -53,6 +59,8 @@ main(int argc, char *argv[])
                "generated\n");
         printf("       %s --ml2-stress=<samples-per-d>\n", argv[0]);
         printf("Runs the opt-in deterministic d=4/8/16 ML2 retry-rate measurement.\n");
+        printf("       %s --ml2-correctness-only\n", argv[0]);
+        printf("Runs only deterministic ML2/MLLL correctness regressions.\n");
         return 1;
     }
 
@@ -73,24 +81,27 @@ main(int argc, char *argv[])
 
     printf("Running quaternion module unit tests\n");
 
+    if (ml2_correctness_only)
+        return quat_test_ml2_correctness();
+
     res = res | ibz_test_mul_sqrt();
     res = res | ibz_test_rand_interval_endpoints();
-    // res = res | ibz_test_intbig();
+    res = res | ibz_test_intbig();
     // // res = res | mini_gmp_test();
     // res = res | quat_test_finit();
-    // res = res | quat_test_dim4();
-    // res = res | quat_test_dim2();
-    // res = res | quat_test_integers();
+    res = res | quat_test_dim4();
+    res = res | quat_test_dim2();
+    res = res | quat_test_integers();
 
     // res = res | quat_test_hnf();
-    // res = res | quat_test_algebra();
-    // res = res | quat_test_lattice();
+    res = res | quat_test_algebra();
+    res = res | quat_test_lattice();
     // res = res | quat_test_lll();
     res = res | quat_test_mlll();
     res = res | quat_test_ml2_correctness();
-    // res = res | quat_test_lideal();
-    // res = res | quat_test_normeq();
-    // res = res | quat_test_lat_ball();
+    res = res | quat_test_lideal();
+    res = res | quat_test_normeq();
+    res = res | quat_test_lat_ball();
     // res = res | quat_test_with_randomization();
     if (res != 0) {
         printf("\nSome tests failed!\n");

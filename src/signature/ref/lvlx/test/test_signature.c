@@ -1,10 +1,13 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <locale.h>
+#include <string.h>
 #include <time.h>
 
 #include <verification.h>
 #include <signature.h>
+#include <encoded_sizes.h>
+#include <torsion_constants.h>
 
 #include <tools.h>
 #include <rng.h>
@@ -53,9 +56,89 @@ test_sqisign(int repeat)
     for (int i = 0; i < repeat; ++i) {
         printf("#%d \n", i);
         
-        protocols_keygen(&pk, &sk);
+        if (!protocols_keygen(&pk, &sk)) {
+            printf("keygen failed ! \n");
+            res = 0;
+            continue;
+        }
         printf("-----keygen done------\n");
-        protocols_sign(&sig, &pk, &sk, msg, 32);
+
+        // Secret-key serialization must reject values that do not fit their
+        // fixed-width field even in Release builds, and must not leave a
+        // partially encoded key behind.
+        {
+            unsigned char encoded_sk[SECRETKEY_BYTES];
+            ibz_t saved_norm;
+            ibz_init(&saved_norm);
+            ibz_copy(&saved_norm, &sk.secret_ideal.norm);
+            ibz_pow(&sk.secret_ideal.norm, &ibz_const_two, 8 * FP_ENCODED_BYTES);
+            memset(encoded_sk, 0xa5, sizeof(encoded_sk));
+            if (secret_key_to_bytes(encoded_sk, &sk, &pk)) {
+                printf("oversized secret-key component accepted ! \n");
+                res = 0;
+            }
+            for (size_t j = 0; j < sizeof(encoded_sk); ++j) {
+                if (encoded_sk[j] != 0) {
+                    printf("failed secret-key encoding was not cleared ! \n");
+                    res = 0;
+                    break;
+                }
+            }
+            ibz_copy(&sk.secret_ideal.norm, &saved_norm);
+            ibz_finalize(&saved_norm);
+
+            /* The matrix is modulo 2^TORSION_EVEN_POWER.  Its byte encoding
+             * has unused high bits at every parameter set; those bits must
+             * not provide alternate encodings of the same secret key. */
+            {
+                secret_key_t decoded_sk;
+                public_key_t decoded_pk;
+                const size_t matrix_offset =
+                    SECRETKEY_BYTES - 4 * TORSION_2POWER_BYTES;
+                secret_key_init(&decoded_sk);
+                public_key_init(&decoded_pk);
+                if (!secret_key_to_bytes(encoded_sk, &sk, &pk)) {
+                    printf("valid secret-key encoding failed ! \n");
+                    res = 0;
+                } else {
+                    encoded_sk[matrix_offset + TORSION_2POWER_BYTES - 1] |= 0x80;
+                    if (secret_key_from_bytes(&decoded_sk, &decoded_pk, encoded_sk)) {
+                        printf("non-canonical secret-key matrix encoding accepted ! \n");
+                        res = 0;
+                    }
+                }
+                public_key_finalize(&decoded_pk);
+                secret_key_finalize(&decoded_sk);
+            }
+
+            // Flipping hint_A selects the construction with the wrong
+            // quadratic character. Secret-key decoding must propagate the
+            // canonical-basis reconstruction failure.
+            if (!fp2_is_zero(&pk.curve.A)) {
+                secret_key_t decoded_sk;
+                public_key_t decoded_pk;
+                secret_key_init(&decoded_sk);
+                public_key_init(&decoded_pk);
+                if (!secret_key_to_bytes(encoded_sk, &sk, &pk)) {
+                    printf("valid secret-key encoding failed ! \n");
+                    res = 0;
+                } else {
+                    encoded_sk[PUBLICKEY_BYTES - 1] ^= 1;
+                    if (secret_key_from_bytes(&decoded_sk, &decoded_pk, encoded_sk)) {
+                        printf("invalid secret-key basis hint accepted ! \n");
+                        res = 0;
+                    }
+                }
+                public_key_finalize(&decoded_pk);
+                secret_key_finalize(&decoded_sk);
+            }
+        }
+
+        if (!protocols_sign(&sig, &pk, &sk, msg, 32)) {
+            printf("sign failed ! \n");
+            res = 0;
+            continue;
+        }
         printf("-----sign done------\n");
         int check = protocols_verify(&sig, &pk, msg, 32);
         if (!check) {

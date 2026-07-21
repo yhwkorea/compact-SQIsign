@@ -18,8 +18,10 @@ encode_digits(byte_t *enc, const digit_t *x, size_t nbytes)
     const size_t ndigits = nbytes / sizeof(digit_t);
     const size_t rem = nbytes % sizeof(digit_t);
 
-    for (size_t i = 0; i < ndigits; i++)
-        ((digit_t *)enc)[i] = BSWAP_DIGIT(x[i]);
+    for (size_t i = 0; i < ndigits; i++) {
+        digit_t word = BSWAP_DIGIT(x[i]);
+        memcpy(enc + i * sizeof(digit_t), &word, sizeof(word));
+    }
     if (rem) {
         digit_t ld = BSWAP_DIGIT(x[ndigits]);
         memcpy(enc + ndigits * sizeof(digit_t), (byte_t *)&ld, rem);
@@ -47,47 +49,56 @@ decode_digits(digit_t *x, const byte_t *enc, size_t nbytes, size_t ndigits)
 static byte_t *
 ibz_to_bytes(byte_t *enc, const ibz_t *x, size_t nbytes, bool sgn)
 {
-#ifndef NDEBUG
-    {
-        // make sure there is enough space
-        ibz_t abs, bnd;
-        ibz_init(&bnd);
-        ibz_init(&abs);
-        ibz_pow(&bnd, &ibz_const_two, 8 * nbytes - sgn);
-        ibz_abs(&abs, x);
-        assert(ibz_cmp(&abs, &bnd) < 0);
-        ibz_finalize(&bnd);
-        ibz_finalize(&abs);
+    if (nbytes == 0 || nbytes > IBZ_LIMBS * sizeof(digit_t) || nbytes > SIZE_MAX / 8) {
+        return NULL;
     }
-#endif
-    const size_t digits = (nbytes + sizeof(digit_t) - 1) / sizeof(digit_t);
-    digit_t d[digits];
+
+    const size_t encoded_bits = 8 * nbytes;
+    const int negative = ibz_is_negative(x);
+    const int magnitude_bits = ibz_bitsize(x);
+
+    if ((!sgn && negative) ||
+        (!negative && (size_t)magnitude_bits > encoded_bits - (sgn ? 1 : 0))) {
+        return NULL;
+    }
+
+    if (negative && encoded_bits < IBZ_BITS && (size_t)magnitude_bits >= encoded_bits) {
+        // A signed n-byte integer may have magnitude 2^(8n-1) only for its
+        // most-negative value. No larger magnitude is representable.
+        ibz_t magnitude, limit;
+        ibz_init(&magnitude);
+        ibz_init(&limit);
+        ibz_abs(&magnitude, x);
+        ibz_pow(&limit, &ibz_const_two, (uint32_t)(encoded_bits - 1));
+        int fits = ibz_cmp(&magnitude, &limit) == 0;
+        ibz_finalize(&limit);
+        ibz_finalize(&magnitude);
+        if (!fits) {
+            return NULL;
+        }
+    }
+
+    // Use full intbig capacity so conversion cannot overrun a field-sized VLA
+    // before the encoded-size check has a chance to reject the value.
+    digit_t d[IBZ_LIMBS];
     memset(d, 0, sizeof(d));
     if (ibz_cmp(x, &ibz_const_zero) >= 0) {
         // non-negative, straightforward.
-        ibz_to_digits(d, x);
+        if (!ibz_to_digits_checked(d, IBZ_LIMBS, x)) {
+            return NULL;
+        }
     } else {
-        assert(sgn);
         // negative; use two's complement.
         ibz_t tmp;
         ibz_init(&tmp);
         ibz_neg(&tmp, x);
         ibz_sub(&tmp, &tmp, &ibz_const_one);
-        ibz_to_digits(d, &tmp);
-        for (size_t i = 0; i < digits; ++i)
-            d[i] = ~d[i];
-#ifndef NDEBUG
-        {
-            // make sure the result is correct
-            ibz_t chk;
-            ibz_init(&chk);
-            ibz_copy_digit_array(&tmp, d);
-            ibz_sub(&tmp, &tmp, x);
-            ibz_pow(&chk, &ibz_const_two, 8 * sizeof(d));
-            assert(!ibz_cmp(&tmp, &chk));
-            ibz_finalize(&chk);
+        if (!ibz_to_digits_checked(d, IBZ_LIMBS, &tmp)) {
+            ibz_finalize(&tmp);
+            return NULL;
         }
-#endif
+        for (size_t i = 0; i < IBZ_LIMBS; ++i)
+            d[i] = ~d[i];
         ibz_finalize(&tmp);
     }
     encode_digits(enc, d, nbytes);
@@ -105,9 +116,10 @@ ibz_from_bytes(ibz_t *x, const byte_t *enc, size_t nbytes, bool sgn)
     decode_digits(d, enc, nbytes, ndigits);
     if (sgn && enc[nbytes - 1] >> 7) {
         // negative, decode two's complement
-        const size_t s = sizeof(digit_t) - 1 - (sizeof(d) - nbytes);
-        assert(s < sizeof(digit_t));
-        d[ndigits - 1] |= ((digit_t)-1) >> 8 * s << 8 * s;
+        const size_t rem = nbytes % sizeof(digit_t);
+        if (rem != 0) {
+            d[ndigits - 1] |= (digit_t)-1 << (8 * rem);
+        }
         for (size_t i = 0; i < ndigits; ++i)
             d[i] = ~d[i];
         ibz_copy_digits(x, d, ndigits);
@@ -122,54 +134,102 @@ ibz_from_bytes(ibz_t *x, const byte_t *enc, size_t nbytes, bool sgn)
 
 // public API
 
-void
+int
 secret_key_to_bytes(byte_t *enc, const secret_key_t *sk, const public_key_t *pk)
 {
-#ifndef NDEBUG
     byte_t *const start = enc;
-#endif
 
     enc = public_key_to_bytes(enc, pk);
 
-#ifndef NDEBUG
     {
         fp2_t lhs, rhs;
         fp2_mul(&lhs, &sk->curve.A, &pk->curve.C);
         fp2_mul(&rhs, &sk->curve.C, &pk->curve.A);
-        assert(fp2_is_equal(&lhs, &rhs));
+        if (!fp2_is_equal(&lhs, &rhs)) {
+            goto fail;
+        }
     }
-#endif
 
     enc = ibz_to_bytes(enc, &sk->secret_ideal.norm, FP_ENCODED_BYTES, false);
+    if (enc == NULL) {
+        goto fail;
+    }
     {
         quat_alg_elem_t gen;
         quat_alg_elem_init(&gen);
-        int ret UNUSED = quat_lideal_generator(&gen, &sk->secret_ideal, &QUATALG_PINFTY);
-        assert(ret);
+        if (!quat_lideal_generator(&gen, &sk->secret_ideal, &QUATALG_PINFTY)) {
+            quat_alg_elem_finalize(&gen);
+            goto fail;
+        }
         // we skip encoding the denominator since it won't change the generated ideal
-#ifndef NDEBUG
         {
             // let's make sure that the denominator is indeed coprime to the norm of the ideal
             ibz_t gcd;
             ibz_init(&gcd);
             ibz_gcd(&gcd, &gen.denom, &sk->secret_ideal.norm);
-            assert(!ibz_cmp(&gcd, &ibz_const_one));
+            int coprime = ibz_is_one(&gcd);
             ibz_finalize(&gcd);
+            if (!coprime) {
+                quat_alg_elem_finalize(&gen);
+                goto fail;
+            }
         }
-#endif
         enc = ibz_to_bytes(enc, &gen.coord[0], FP_ENCODED_BYTES, true);
+        if (enc == NULL) {
+            quat_alg_elem_finalize(&gen);
+            goto fail;
+        }
         enc = ibz_to_bytes(enc, &gen.coord[1], FP_ENCODED_BYTES, true);
+        if (enc == NULL) {
+            quat_alg_elem_finalize(&gen);
+            goto fail;
+        }
         enc = ibz_to_bytes(enc, &gen.coord[2], FP_ENCODED_BYTES, true);
+        if (enc == NULL) {
+            quat_alg_elem_finalize(&gen);
+            goto fail;
+        }
         enc = ibz_to_bytes(enc, &gen.coord[3], FP_ENCODED_BYTES, true);
+        if (enc == NULL) {
+            quat_alg_elem_finalize(&gen);
+            goto fail;
+        }
         quat_alg_elem_finalize(&gen);
     }
 
-    enc = ibz_to_bytes(enc, &sk->mat_BAcan_to_BA0_two[0][0], TORSION_2POWER_BYTES, false);
-    enc = ibz_to_bytes(enc, &sk->mat_BAcan_to_BA0_two[0][1], TORSION_2POWER_BYTES, false);
-    enc = ibz_to_bytes(enc, &sk->mat_BAcan_to_BA0_two[1][0], TORSION_2POWER_BYTES, false);
-    enc = ibz_to_bytes(enc, &sk->mat_BAcan_to_BA0_two[1][1], TORSION_2POWER_BYTES, false);
+    for (int row = 0; row < 2; row++) {
+        for (int col = 0; col < 2; col++) {
+            if (ibz_is_negative(&sk->mat_BAcan_to_BA0_two[row][col]) ||
+                ibz_bitsize(&sk->mat_BAcan_to_BA0_two[row][col]) > TORSION_EVEN_POWER)
+                goto fail;
+        }
+    }
 
-    assert(enc - start == SECRETKEY_BYTES);
+    enc = ibz_to_bytes(enc, &sk->mat_BAcan_to_BA0_two[0][0], TORSION_2POWER_BYTES, false);
+    if (enc == NULL) {
+        goto fail;
+    }
+    enc = ibz_to_bytes(enc, &sk->mat_BAcan_to_BA0_two[0][1], TORSION_2POWER_BYTES, false);
+    if (enc == NULL) {
+        goto fail;
+    }
+    enc = ibz_to_bytes(enc, &sk->mat_BAcan_to_BA0_two[1][0], TORSION_2POWER_BYTES, false);
+    if (enc == NULL) {
+        goto fail;
+    }
+    enc = ibz_to_bytes(enc, &sk->mat_BAcan_to_BA0_two[1][1], TORSION_2POWER_BYTES, false);
+    if (enc == NULL) {
+        goto fail;
+    }
+
+    if ((size_t)(enc - start) != SECRETKEY_BYTES) {
+        goto fail;
+    }
+    return 1;
+
+fail:
+    memset(start, 0, SECRETKEY_BYTES);
+    return 0;
 }
 
 int
@@ -180,6 +240,9 @@ secret_key_from_bytes(secret_key_t *sk, public_key_t *pk, const byte_t *enc)
 #endif
 
     enc = public_key_from_bytes(pk, enc);
+    if (enc == NULL) {
+        return 0;
+    }
 
     {
         ibz_t norm;
@@ -206,9 +269,19 @@ secret_key_from_bytes(secret_key_t *sk, public_key_t *pk, const byte_t *enc)
     enc = ibz_from_bytes(&sk->mat_BAcan_to_BA0_two[1][0], enc, TORSION_2POWER_BYTES, false);
     enc = ibz_from_bytes(&sk->mat_BAcan_to_BA0_two[1][1], enc, TORSION_2POWER_BYTES, false);
 
+    for (int row = 0; row < 2; row++) {
+        for (int col = 0; col < 2; col++) {
+            if (ibz_bitsize(&sk->mat_BAcan_to_BA0_two[row][col]) > TORSION_EVEN_POWER)
+                return 0;
+        }
+    }
+
     assert(enc - start == SECRETKEY_BYTES);
 
     sk->curve = pk->curve;
-    ec_curve_to_basis_2f_from_hint(&sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER, pk->hint_pk);
+    if (!ec_curve_to_basis_2f_from_hint(
+            &sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER, pk->hint_pk)) {
+        return 0;
+    }
     return 1;
 }

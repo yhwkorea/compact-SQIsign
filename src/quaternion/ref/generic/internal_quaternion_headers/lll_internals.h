@@ -214,6 +214,12 @@ int quat_lll_verify(const ibz_mat_4x4_t *mat,
  * @param G In/Output: Gram matrix of the lattice basis
  * @param basis In/Output: lattice basis
  */
+/** Status-returning L2 core.  Integer updates are capacity checked and a zero
+ * return means neither the mutated working Gram matrix nor basis may be used. */
+int quat_lll_core_checked(ibz_mat_4x4_t *G, ibz_mat_4x4_t *basis);
+
+/** Compatibility wrapper for test/benchmark code that supplies known-valid
+ * bounded inputs.  Production callers must use quat_lll_core_checked. */
 void quat_lll_core(ibz_mat_4x4_t *G, ibz_mat_4x4_t *basis);
 
 /**
@@ -254,7 +260,10 @@ ibq_print_scalar(const char *name, const ibq_t *x)
  * `out_capacity` reduced basis vectors into `output`, returns the rank.
  *
  * Used to replace `ibz_mat_4xn_hnf_mod_core` and `quat_lattice_hnf` in the
- * lattice operations (paper Issue 8: "replace only the HNF portion with ML2"). */
+ * lattice operations (paper Issue 8: "replace only the HNF portion with ML2").
+ * When `alg` is non-NULL, reduction uses the quaternion reduced-norm Gram
+ * form diag(1,1,p,p), as required by compact MLLL.  A NULL `alg` selects a
+ * Euclidean fallback only for algebra-independent span computations. */
 int quat_ml2(ibz_vec_4_t *output,
              int out_capacity,
              const ibz_vec_4_t *input,
@@ -289,6 +298,16 @@ int quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
                                 int d,
                                 const quat_alg_t *alg,
                                 quat_ml2_reducer_t reducer);
+
+/** Generic MLLL retry driver.  A valid lower-rank first result is published
+ * without retries; negative failures try the remaining permutations.  This
+ * entry point shares the same atomic profiling path as full-rank retry. */
+int quat_ml2_mlll_with_reducer(ibz_vec_4_t *output,
+                               int out_capacity,
+                               const ibz_vec_4_t *input,
+                               int d,
+                               const quat_alg_t *alg,
+                               quat_ml2_reducer_t reducer);
 
 int quat_ml2_retry(ibz_vec_4_t *output,
                    int out_capacity,

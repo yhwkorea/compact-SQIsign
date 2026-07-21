@@ -9,3 +9,14 @@ target_link_libraries(${LIB_VERIFICATION_${SVARIANT_UPPER}} ${LIB_PRECOMP_${SVAR
 target_include_directories(${LIB_VERIFICATION_${SVARIANT_UPPER}} PRIVATE ${INC_PUBLIC} ${INC_COMMON} ${INC_PRECOMP_${SVARIANT_UPPER}} ${INC_MP} ${INC_GF} ${INC_GF_${SVARIANT_UPPER}} ${INC_EC} ${INC_HD} ${INC_VERIFICATION})
 target_compile_options(${LIB_VERIFICATION_${SVARIANT_UPPER}} PRIVATE ${C_OPT_FLAGS})
 target_compile_definitions(${LIB_VERIFICATION_${SVARIANT_UPPER}} PUBLIC SQISIGN_VARIANT=${SVARIANT_LOWER})
+
+add_executable(sqisign_test_verification_encoding_${SVARIANT_LOWER}
+    ${LVLX_DIR}/test/test_encoding.c)
+target_link_libraries(sqisign_test_verification_encoding_${SVARIANT_LOWER}
+    ${LIB_VERIFICATION_${SVARIANT_UPPER}} sqisign_common_sys)
+target_include_directories(sqisign_test_verification_encoding_${SVARIANT_LOWER} PRIVATE
+    ${INC_PUBLIC} ${INC_COMMON} ${INC_PRECOMP_${SVARIANT_UPPER}} ${INC_MP}
+    ${INC_GF} ${INC_GF_${SVARIANT_UPPER}} ${INC_EC} ${INC_HD}
+    ${INC_VERIFICATION})
+add_test(sqisign_test_verification_encoding_${SVARIANT_LOWER}
+    sqisign_test_verification_encoding_${SVARIANT_LOWER})

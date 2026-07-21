@@ -20,7 +20,7 @@ int dim2id2iso_test_fixed_degree_isogeny(void);
 
 int dim2id2iso_test_find_uv(void);
 
-int dim2id2iso_test_find_uv(void);
+int dim2id2iso_enumerate_hypercube_regression_test(void);
 
 int dim2id2iso_test_dimid2iso(void);
 

@@ -25,6 +25,12 @@ quat_test_lideal_norm(void)
     quat_lideal_norm(&lideal);
     res = res || ibz_cmp(&(lideal.norm), &norm);
 
+    /* A missing parent order is an invalid ideal, not an ideal of norm zero. */
+    lideal.parent_order = NULL;
+    ibz_set(&lideal.norm, 73);
+    res = res || quat_lideal_norm(&lideal);
+    res = res || !ibz_is_zero(&lideal.norm);
+
     if (res != 0) {
         printf("Quaternion unit test lideal_norm failed\n");
     }
@@ -81,18 +87,20 @@ quat_test_lideal_create_principal(void)
     quat_alg_t alg;
     quat_lattice_t lat;
     quat_alg_elem_t gamma;
-    quat_left_ideal_t I;
+    quat_left_ideal_t I, before;
     quat_alg_init_set_ui(&alg, 367);
     quat_lattice_init(&lat);
     quat_alg_elem_init(&gamma);
     quat_left_ideal_init(&I);
+    quat_left_ideal_init(&before);
     quat_lattice_O0_set(&lat);
     ibz_set(&gamma.coord[0], 219);
     ibz_set(&gamma.coord[1], 200);
     ibz_set(&gamma.coord[2], 78);
     ibz_set(&gamma.coord[3], -1);
 
-    quat_lideal_create_principal(&I, &gamma, &lat, &alg);
+    res |= !quat_lideal_create_principal(&I, &gamma, &lat, &alg);
+    res |= !quat_lattice_hnf(&I.lattice);
 
     res |= I.parent_order != &lat;
     res |= ibz_cmp_int32(&I.norm, 2321156);
@@ -118,6 +126,17 @@ quat_test_lideal_create_principal(void)
     res |= ibz_cmp_int32(&I.lattice.basis[2][3], 0);
     res |= ibz_cmp_int32(&I.lattice.basis[3][3], 1);
 
+    /* Force a failure after the initial validity checks: zero is contained in
+     * the order but cannot generate a full-rank principal ideal.  The prior
+     * successful output must remain intact. */
+    quat_lideal_copy(&before, &I);
+    quat_alg_elem_set(&gamma, 1, 0, 0, 0, 0);
+    res |= quat_lideal_create_principal(&I, &gamma, &lat, &alg);
+    res |= I.parent_order != before.parent_order;
+    res |= ibz_cmp(&I.norm, &before.norm);
+    res |= ibz_cmp(&I.lattice.denom, &before.lattice.denom);
+    res |= !ibz_mat_4x4_equal(&I.lattice.basis, &before.lattice.basis);
+
     // same test, just with gamma not reduced
     ibz_set(&gamma.coord[0], 438);
     ibz_set(&gamma.coord[1], 400);
@@ -125,7 +144,8 @@ quat_test_lideal_create_principal(void)
     ibz_set(&gamma.coord[3], -2);
     ibz_set(&gamma.denom, 2);
 
-    quat_lideal_create_principal(&I, &gamma, &lat, &alg);
+    res |= !quat_lideal_create_principal(&I, &gamma, &lat, &alg);
+    res |= !quat_lattice_hnf(&I.lattice);
 
     res |= I.parent_order != &lat;
     res |= ibz_cmp_int32(&I.norm, 2321156);
@@ -165,7 +185,8 @@ quat_test_lideal_create_principal(void)
     ibz_set(&gamma.coord[3], -2);
     ibz_set(&gamma.denom, 2);
 
-    quat_lideal_create_principal(&I, &gamma, &lat, &alg);
+    res |= !quat_lideal_create_principal(&I, &gamma, &lat, &alg);
+    res |= !quat_lattice_hnf(&I.lattice);
 
     res |= I.parent_order != &lat;
     res |= ibz_cmp_int32(&I.norm, 2321156);
@@ -195,11 +216,78 @@ quat_test_lideal_create_principal(void)
     quat_lattice_finalize(&lat);
     quat_alg_elem_finalize(&gamma);
     quat_left_ideal_finalize(&I);
+    quat_left_ideal_finalize(&before);
 
     if (res != 0) {
         printf("Quaternion unit test lideal_create_principal failed\n");
     }
     return (res);
+}
+
+int
+quat_test_lideal_lideal_mul_reduced_transaction(void)
+{
+    int res = 0;
+    ibz_t n;
+    quat_alg_t alg;
+    quat_alg_elem_t gen;
+    quat_lattice_t order;
+    quat_left_ideal_t lideal1, lideal2, prod, before;
+    ibz_mat_4x4_t gram, gram_before;
+
+    ibz_init(&n);
+    quat_alg_init_set_ui(&alg, 103);
+    quat_alg_elem_init(&gen);
+    quat_lattice_init(&order);
+    quat_left_ideal_init(&lideal1);
+    quat_left_ideal_init(&lideal2);
+    quat_left_ideal_init(&prod);
+    quat_left_ideal_init(&before);
+    ibz_mat_4x4_init(&gram);
+    ibz_mat_4x4_init(&gram_before);
+    quat_lattice_O0_set(&order);
+
+    ibz_set(&n, 113);
+    quat_alg_elem_set(&gen, 1, 10, 0, 1, 3);
+    res |= !quat_lideal_create(&lideal1, &gen, &n, &order, &alg);
+    ibz_set(&n, 89);
+    quat_alg_elem_set(&gen, 2, 2, 5, 1, 4);
+    res |= !quat_lideal_create(&lideal2, &gen, &n, &order, &alg);
+
+    quat_lattice_O0_set(&prod.lattice);
+    ibz_set(&prod.norm, 77);
+    prod.parent_order = &order;
+    quat_lideal_copy(&before, &prod);
+    ibz_mat_4x4_zero(&gram);
+    ibz_set(&gram[0][0], 91);
+    ibz_mat_4x4_copy(&gram_before, &gram);
+
+    /* Lattice multiplication succeeds, then norm computation must reject the
+     * deliberately missing parent order.  Neither output may be published. */
+    lideal1.parent_order = NULL;
+    res |= quat_lideal_lideal_mul_reduced(
+        &prod, &gram, &lideal1, &lideal2, &alg);
+    res |= prod.parent_order != before.parent_order;
+    res |= ibz_cmp(&prod.norm, &before.norm);
+    res |= ibz_cmp(&prod.lattice.denom, &before.lattice.denom);
+    res |= !ibz_mat_4x4_equal(&prod.lattice.basis, &before.lattice.basis);
+    res |= !ibz_mat_4x4_equal(&gram, &gram_before);
+
+    if (res != 0) {
+        printf("Quaternion unit test lideal_lideal_mul_reduced transaction failed\n");
+    }
+
+    ibz_mat_4x4_finalize(&gram_before);
+    ibz_mat_4x4_finalize(&gram);
+    quat_left_ideal_finalize(&before);
+    quat_left_ideal_finalize(&prod);
+    quat_left_ideal_finalize(&lideal2);
+    quat_left_ideal_finalize(&lideal1);
+    quat_lattice_finalize(&order);
+    quat_alg_elem_finalize(&gen);
+    quat_alg_finalize(&alg);
+    ibz_finalize(&n);
+    return res;
 }
 
 // void quat_lideal_create(quat_left_ideal_t *lideal, const quat_alg_elem_t *x, const
@@ -226,7 +314,8 @@ quat_test_lideal_create_from_primitive(void)
     ibz_set(&gamma.coord[3], -1);
     ibz_set(&N, 31);
 
-    quat_lideal_create(&I, &gamma, &N, &lat, &alg);
+    res |= !quat_lideal_create(&I, &gamma, &N, &lat, &alg);
+    res |= !quat_lattice_hnf(&I.lattice);
 
     res |= I.parent_order != &lat;
     res |= ibz_cmp(&I.norm, &N);
@@ -917,6 +1006,7 @@ quat_test_lideal(void)
     res = res | quat_test_lideal_norm();
     res = res | quat_test_lideal_copy();
     res = res | quat_test_lideal_create_principal();
+    res = res | quat_test_lideal_lideal_mul_reduced_transaction();
     res = res | quat_test_lideal_create_from_primitive();
     res = res | quat_test_lideal_generator();
     res = res | quat_test_lideal_mul();

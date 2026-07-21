@@ -42,11 +42,17 @@ bench_basis_generation(unsigned int n, int iterations)
     fp2_set_one(&(curve.C));
     ec_curve_normalize_A24(&curve);
 
+    uint8_t hint;
+    if (!ec_curve_to_basis_2f_to_hint(&basis, &curve, n, &hint)) {
+        fprintf(stderr, "Basis generation failed\n");
+        return;
+    }
+
     // Full even torsion generation without hints
     for (i = 0; i < 20; i++) {
         cycles1 = cpucycles();
         for (j = 0; j < iterations; j++) {
-            (void)ec_curve_to_basis_2f_to_hint(&basis, &curve, n);
+            (void)ec_curve_to_basis_2f_to_hint(&basis, &curve, n, &hint);
         }
         cycles2 = cpucycles();
         cycle_runs[i] = cycles2 - cycles1;
@@ -74,7 +80,11 @@ bench_basis_generation_from_hint(unsigned int n, int iterations)
     fp2_set_one(&(curve.C));
     ec_curve_normalize_A24(&curve);
 
-    uint8_t hint = ec_curve_to_basis_2f_to_hint(&basis, &curve, n);
+    uint8_t hint;
+    if (!ec_curve_to_basis_2f_to_hint(&basis, &curve, n, &hint)) {
+        fprintf(stderr, "Basis generation failed\n");
+        return;
+    }
 
     // Full even torsion generation without hints
     for (i = 0; i < 20; i++) {

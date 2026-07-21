@@ -1,33 +1,18 @@
 /**
  * @file mlll.c
- * @brief Modified LLL algorithm (Pohst 1987) — Cohen integer GSO port
+ * @brief Compact modified LLL entry points backed by ML2 (NS09)
  *
  * Implementation of the MLLL algorithm that takes a generating set
  * (possibly linearly dependent) and produces an LLL-reduced basis.
  *
- * State representation: Cohen 2.6.7 integer GSO
- *   b[i] in Z^4              — basis vector
- *   d[k+1] = det(Gram_{0..k}) — integer GSO determinants (d[0] = 1)
- *   Lambda[i][j] = d[j+1] * mu[i][j], integer (defined for j < i)
- *
- * All intermediate arithmetic is integer (ibz_t). No rationals (ibq_t),
- * no floats (dpe_t / mpfr). Preserves KLKL25 GMP-free + integer-only
- * contribution while avoiding the buffer-overflow / precision-loss
- * failure modes of ibq rational and dpe-float backends.
- *
- * Reference (Pohst MLLL Algorithm 1):
- *   M. Pohst, "A modification of the LLL reduction algorithm",
- *   J. Symbolic Computation, 4(1):123-127, 1987.
- *
- * Reference (Cohen integer GSO, Algorithms 2.6.3 / 2.6.6 / 2.6.7):
- *   H. Cohen, "A Course in Computational Algebraic Number Theory",
- *   Springer GTM 138, 1993.
+ * The paper calls the NS09 floating-point modified LLL routine ML2/MLLL.
+ * Exact vectors and Gram entries remain ibz_t; dpe_t is used only for the
+ * approximate reduction decisions inside ml2.c.
  *
  * Paper mapping ("Compact Quaternion Algorithms for SQIsign"):
  *   Algorithm 1 (MLLL) — entry point quat_mlll
  *   Algorithm 2 line 6-7 — quat_lattice_mul_mlll
  *   Lemma 3 (mlll-bound) — bound applies to b/h/G integer entries.
- *   Cohen GSO d[]/Lambda[][] are auxiliary, bounded by ||a||^(2k).
  */
 
 #include <quaternion.h>
@@ -41,6 +26,10 @@ static int
 mlll_lattice_add_products_fit(const quat_lattice_t *lat1,
                               const quat_lattice_t *lat2)
 {
+    if (lat1 == NULL || lat2 == NULL || ibz_is_zero(&lat1->denom) ||
+        ibz_is_zero(&lat2->denom))
+        return 0;
+
     int basis1_bits = 0;
     int basis2_bits = 0;
     for (int row = 0; row < 4; row++) {
@@ -62,7 +51,125 @@ mlll_lattice_add_products_fit(const quat_lattice_t *lat1,
            2 * generator_bits + 2 <= IBZ_BITS - 1;
 }
 
+static int
+mlll_positive_sum_bound(int left, int right)
+{
+    if (left == 0)
+        return right;
+    if (right == 0)
+        return left;
+    return (left > right ? left : right) + 1;
+}
+
+static int
+mlll_product_bound(const ibz_t *left, const ibz_t *right)
+{
+    int left_bits = ibz_bitsize(left);
+    int right_bits = ibz_bitsize(right);
+    return left_bits == 0 || right_bits == 0 ? 0 : left_bits + right_bits;
+}
+
+static int
+mlll_weight_bound(int bound, const quat_alg_t *alg)
+{
+    if (bound == 0 || ibz_is_one(&alg->p))
+        return bound;
+    return bound + ibz_bitsize(&alg->p);
+}
+
+/* Bound every transient in one quat_alg_coord_mul exactly according to the
+ * source evaluation order.  In particular, p is charged only when one of the
+ * coordinate-2/3 products is nonzero, avoiding rejection of large purely
+ * unweighted coordinates. */
+static int
+mlll_quaternion_product_fits(const ibz_vec_4_t *left,
+                             const ibz_vec_4_t *right,
+                             const quat_alg_t *alg)
+{
+    int bound0 = mlll_positive_sum_bound(
+        mlll_product_bound(&(*left)[2], &(*right)[2]),
+        mlll_product_bound(&(*left)[3], &(*right)[3]));
+    bound0 = mlll_weight_bound(bound0, alg);
+    bound0 = mlll_positive_sum_bound(
+        bound0, mlll_product_bound(&(*left)[0], &(*right)[0]));
+    bound0 = mlll_positive_sum_bound(
+        bound0, mlll_product_bound(&(*left)[1], &(*right)[1]));
+
+    int bound1 = mlll_positive_sum_bound(
+        mlll_product_bound(&(*left)[2], &(*right)[3]),
+        mlll_product_bound(&(*left)[3], &(*right)[2]));
+    bound1 = mlll_weight_bound(bound1, alg);
+    bound1 = mlll_positive_sum_bound(
+        bound1, mlll_product_bound(&(*left)[0], &(*right)[1]));
+    bound1 = mlll_positive_sum_bound(
+        bound1, mlll_product_bound(&(*left)[1], &(*right)[0]));
+
+    int bound2 = mlll_positive_sum_bound(
+        mlll_product_bound(&(*left)[0], &(*right)[2]),
+        mlll_product_bound(&(*left)[2], &(*right)[0]));
+    bound2 = mlll_positive_sum_bound(
+        bound2, mlll_product_bound(&(*left)[1], &(*right)[3]));
+    bound2 = mlll_positive_sum_bound(
+        bound2, mlll_product_bound(&(*left)[3], &(*right)[1]));
+
+    int bound3 = mlll_positive_sum_bound(
+        mlll_product_bound(&(*left)[0], &(*right)[3]),
+        mlll_product_bound(&(*left)[3], &(*right)[0]));
+    bound3 = mlll_positive_sum_bound(
+        bound3, mlll_product_bound(&(*left)[2], &(*right)[1]));
+    bound3 = mlll_positive_sum_bound(
+        bound3, mlll_product_bound(&(*left)[1], &(*right)[2]));
+
+    return bound0 <= IBZ_BITS - 1 && bound1 <= IBZ_BITS - 1 &&
+           bound2 <= IBZ_BITS - 1 && bound3 <= IBZ_BITS - 1;
+}
+
+static int
+mlll_lattice_mul_products_fit(const quat_lattice_t *lat1,
+                              const quat_lattice_t *lat2,
+                              const quat_alg_t *alg)
+{
+    if (lat1 == NULL || lat2 == NULL || alg == NULL ||
+        ibz_is_zero(&lat1->denom) || ibz_is_zero(&lat2->denom) ||
+        ibz_cmp(&alg->p, &ibz_const_zero) <= 0)
+        return 0;
+
+    if (ibz_bitsize(&lat1->denom) + ibz_bitsize(&lat2->denom) >
+        IBZ_BITS - 1)
+        return 0;
+
+    for (int left_column = 0; left_column < 4; left_column++) {
+        ibz_vec_4_t left;
+        ibz_vec_4_init(&left);
+        for (int row = 0; row < 4; row++)
+            ibz_copy(&left[row], &lat1->basis[row][left_column]);
+        for (int right_column = 0; right_column < 4; right_column++) {
+            ibz_vec_4_t right;
+            int fits;
+            ibz_vec_4_init(&right);
+            for (int row = 0; row < 4; row++)
+                ibz_copy(&right[row], &lat2->basis[row][right_column]);
+            fits = mlll_quaternion_product_fits(&left, &right, alg);
+            ibz_vec_4_finalize(&right);
+            if (!fits) {
+                ibz_vec_4_finalize(&left);
+                return 0;
+            }
+        }
+        ibz_vec_4_finalize(&left);
+    }
+    return 1;
+}
+
 /* ========== integer helpers ========== */
+
+/* The former Cohen fraction-free port below cannot represent a zero
+ * Gram--Schmidt determinant followed by an independent vector: after a
+ * dependent generator is swapped, it attempts an exact division by that zero
+ * determinant.  Keep it excluded as implementation history; the compact
+ * specification identifies MLLL with the NS09 ML2 reducer implemented in
+ * ml2.c, which is used by the active entry point below. */
+#if 0
 
 /* Quaternion norm bilinear form: <a,b> = a0*b0 + a1*b1 + p*a2*b2 + p*a3*b3 */
 static void
@@ -101,21 +208,25 @@ ibz_vec_4_swap(ibz_vec_4_t *a, ibz_vec_4_t *b)
         ibz_swap(&((*a)[i]), &((*b)[i]));
 }
 
-/* Exact integer division n / d, asserting remainder == 0.
- * Used for Cohen 2.6.7 GS / swap updates where the division is provably exact. */
-static void
+/* Exact integer division n / d.
+ * Used for Cohen 2.6.7 GS / swap updates where the division is provably exact.
+ * Return failure instead of silently accepting a non-zero remainder: with
+ * fixed-width arithmetic that condition can also signal an earlier overflow. */
+static int
 ibz_div_exact(ibz_t *q, const ibz_t *n, const ibz_t *d)
 {
+    if (ibz_is_zero(d)) {
+        ibz_set(q, 0);
+        return 0;
+    }
     ibz_t r;
     ibz_init(&r);
     ibz_div_floor(q, &r, n, d);
-    /* Provably zero in Cohen 2.6.7; if not, sign-corrected adjust. */
-    if (!ibz_is_zero(&r)) {
-        /* div_floor returns r in [0, |d|); for exact div we expect r = 0.
-         * If not zero, fall back to round-toward-zero ibz_div for diagnostics. */
-        ibz_div(q, &r, n, d);
-    }
+    int exact = ibz_is_zero(&r);
+    if (!exact)
+        ibz_set(q, 0);
     ibz_finalize(&r);
+    return exact;
 }
 
 /* Round-to-nearest integer division: q = round(n / d), ties away from zero.
@@ -189,7 +300,7 @@ needs_size_reduce(const ibz_t *Lambda_kl, const ibz_t *d_l1)
  *       u = (d[j+1]*u - Lambda[idx][j]^2) / d[j]   (exact)
  *   d[idx+1] = u
  */
-static void
+static int
 compute_gs_single(int idx,
                   const ibz_vec_4_t *b,
                   ibz_t d[],
@@ -214,7 +325,9 @@ compute_gs_single(int idx,
             ibz_mul(&t1, &d[i + 1], &u);
             ibz_mul(&t2, &Lambda[idx][i], &Lambda[j][i]);
             ibz_sub(&t1, &t1, &t2);
-            ibz_div_exact(&u, &t1, &d[i]);
+            if (!ibz_div_exact(&u, &t1, &d[i])) {
+                goto failure;
+            }
         }
         ibz_copy(&Lambda[idx][j], &u);
     }
@@ -228,7 +341,9 @@ compute_gs_single(int idx,
         ibz_mul(&t1, &d[j + 1], &u);
         ibz_mul(&t2, &Lambda[idx][j], &Lambda[idx][j]);
         ibz_sub(&t1, &t1, &t2);
-        ibz_div_exact(&u, &t1, &d[j]);
+        if (!ibz_div_exact(&u, &t1, &d[j])) {
+            goto failure;
+        }
     }
     ibz_copy(&d[idx + 1], &u);
 
@@ -236,6 +351,14 @@ compute_gs_single(int idx,
     ibz_finalize(&dot);
     ibz_finalize(&t1);
     ibz_finalize(&t2);
+    return 1;
+
+failure:
+    ibz_finalize(&u);
+    ibz_finalize(&dot);
+    ibz_finalize(&t1);
+    ibz_finalize(&t2);
+    return 0;
 }
 
 /* ========== size-reduce step (Cohen 2.6.7 step 4) ========== */
@@ -354,7 +477,7 @@ lovasz_test(int m, const ibz_t d[], const ibz_t Lambda[][N])
  *     Fallback: just swap b/Lambda, recompute GS from m-1.
  *   - d[m] = 0 (b_{m-1}* = 0): caller filtered, won't arrive here.
  */
-static void
+static int
 swap_step(int m, int beta,
           ibz_vec_4_t b[],
           ibz_t d[],
@@ -369,8 +492,9 @@ swap_step(int m, int beta,
             ibz_swap(&Lambda[m][j], &Lambda[m - 1][j]);
         /* Recompute GS rows m-1..beta-1. d[m] may become 0 too. */
         for (int i = (m - 1 < 0 ? 0 : m - 1); i < beta; i++)
-            compute_gs_single(i, b, d, Lambda, p);
-        return;
+            if (!compute_gs_single(i, b, d, Lambda, p))
+                return 0;
+        return 1;
     }
 
     ibz_t lambda, B, t, t1, t2, num;
@@ -387,7 +511,8 @@ swap_step(int m, int beta,
     ibz_mul(&t1, &d[m + 1], &d[m - 1]);
     ibz_mul(&t2, &lambda, &lambda);
     ibz_add(&num, &t1, &t2);
-    ibz_div_exact(&B, &num, &d[m]);
+    if (!ibz_div_exact(&B, &num, &d[m]))
+        goto failure;
 
     /* Update Lambda[i][m], Lambda[i][m-1] for i = m+1..beta-1 */
     for (int i = m + 1; i < beta; i++) {
@@ -397,13 +522,15 @@ swap_step(int m, int beta,
         ibz_mul(&t1, &d[m + 1], &Lambda[i][m - 1]);
         ibz_mul(&t2, &lambda, &t);
         ibz_sub(&num, &t1, &t2);
-        ibz_div_exact(&Lambda[i][m], &num, &d[m]);
+        if (!ibz_div_exact(&Lambda[i][m], &num, &d[m]))
+            goto failure;
 
         /* Lambda[i][m-1] = (B * t + lambda * Lambda[i][m]) / d[m+1] */
         ibz_mul(&t1, &B, &t);
         ibz_mul(&t2, &lambda, &Lambda[i][m]);
         ibz_add(&num, &t1, &t2);
-        ibz_div_exact(&Lambda[i][m - 1], &num, &d[m + 1]);
+        if (!ibz_div_exact(&Lambda[i][m - 1], &num, &d[m + 1]))
+            goto failure;
     }
 
     /* Swap b[m] <-> b[m-1] */
@@ -421,6 +548,16 @@ swap_step(int m, int beta,
     ibz_finalize(&t1);
     ibz_finalize(&t2);
     ibz_finalize(&num);
+    return 1;
+
+failure:
+    ibz_finalize(&lambda);
+    ibz_finalize(&B);
+    ibz_finalize(&t);
+    ibz_finalize(&t1);
+    ibz_finalize(&t2);
+    ibz_finalize(&num);
+    return 0;
 }
 
 /* ========== MLLL core (Pohst Algorithm 1, 0-indexed) ========== */
@@ -432,7 +569,13 @@ quat_mlll(ibz_mat_4x4_t *basis,
           int g,
           const quat_alg_t *alg)
 {
-    assert(g >= 1 && g <= MLLL_MAX_GENERATORS);
+    if (g < 1 || g > MLLL_MAX_GENERATORS) {
+        *rank = 0;
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++)
+                ibz_set(&((*basis)[i][j]), 0);
+        return;
+    }
 
     ibz_vec_4_t b[N];
     ibz_t d[N + 1];
@@ -465,7 +608,8 @@ load:
             ibz_copy(&(b[beta][i]), &(generators[alpha][i]));
         alpha++;
 
-        compute_gs_single(beta, b, d, Lambda, &alg->p);
+        if (!compute_gs_single(beta, b, d, Lambda, &alg->p))
+            goto failure;
         beta++;
 
         if (!ibz_is_zero(&d[beta]) && alpha < g)
@@ -498,7 +642,8 @@ reduction:
 
     /* Lovász test */
     if (lovasz_test(m, d, Lambda)) {
-        swap_step(m, beta, b, d, Lambda, &alg->p);
+        if (!swap_step(m, beta, b, d, Lambda, &alg->p))
+            goto failure;
         if (m > 1)
             m--;
         goto reduction;
@@ -537,13 +682,15 @@ remove_vector:
         /* Recompute all GS for final pass */
         ibz_set(&d[0], 1);
         for (int i = 0; i < beta; i++)
-            compute_gs_single(i, b, d, Lambda, &alg->p);
+            if (!compute_gs_single(i, b, d, Lambda, &alg->p))
+                goto failure;
         goto done;
     }
 
     /* Recompute GS from position m */
     for (int i = m; i < beta; i++)
-        compute_gs_single(i, b, d, Lambda, &alg->p);
+        if (!compute_gs_single(i, b, d, Lambda, &alg->p))
+            goto failure;
 
     tau = m + 1;
     if (tau < 1)
@@ -556,7 +703,8 @@ done:
     if (beta > 1) {
         ibz_set(&d[0], 1);
         for (int i = 0; i < beta; i++)
-            compute_gs_single(i, b, d, Lambda, &alg->p);
+            if (!compute_gs_single(i, b, d, Lambda, &alg->p))
+                goto failure;
 
         int changed = 1;
         int safety = 0;
@@ -587,13 +735,15 @@ done:
                     beta--;
                     ibz_set(&d[0], 1);
                     for (int i = 0; i < beta; i++)
-                        compute_gs_single(i, b, d, Lambda, &alg->p);
+                        if (!compute_gs_single(i, b, d, Lambda, &alg->p))
+                            goto failure;
                     changed = 1;
                     continue;
                 }
 
                 if (lovasz_test(mm, d, Lambda)) {
-                    swap_step(mm, beta, b, d, Lambda, &alg->p);
+                    if (!swap_step(mm, beta, b, d, Lambda, &alg->p))
+                        goto failure;
                     if (mm > 1)
                         mm--;
                     changed = 1;
@@ -602,8 +752,18 @@ done:
                 mm++;
             }
         }
+        if (changed)
+            goto failure;
     }
 
+    goto publish;
+
+failure:
+    /* Do not publish a partially reduced lattice after an arithmetic or
+     * convergence failure.  Callers already use rank as the status channel. */
+    beta = 0;
+
+publish:
     /* Copy output: basis columns = non-zero b vectors */
     *rank = 0;
     for (int i = 0; i < 4; i++)
@@ -627,9 +787,51 @@ done:
             ibz_finalize(&Lambda[i][j]);
 }
 
+#endif
+
+/* Active compact MLLL entry point.  ML2 publishes its output only after the
+ * reduction finishes.  A failed attempt is retried using span-preserving
+ * permutations; no surrounding protocol state is regenerated. */
+void
+quat_mlll(ibz_mat_4x4_t *basis,
+          int *rank,
+          const ibz_vec_4_t *generators,
+          int g,
+          const quat_alg_t *alg)
+{
+    ibz_vec_4_t reduced[4];
+    int rho = -1;
+
+    if (basis == NULL || rank == NULL)
+        return;
+    *rank = 0;
+    for (int row = 0; row < 4; row++)
+        for (int column = 0; column < 4; column++)
+            ibz_set(&(*basis)[row][column], 0);
+
+    if (generators == NULL || g < 1 || g > MLLL_MAX_GENERATORS)
+        return;
+
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_init(&reduced[i]);
+
+    rho = quat_ml2_mlll_with_reducer(
+        reduced, 4, generators, g, alg, quat_ml2);
+
+    if (rho >= 0 && rho <= 4) {
+        for (int column = 0; column < rho; column++)
+            for (int row = 0; row < 4; row++)
+                ibz_copy(&(*basis)[row][column], &reduced[column][row]);
+        *rank = rho;
+    }
+
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_finalize(&reduced[i]);
+}
+
 /* ========== Lattice operations using MLLL ========== */
 
-void
+int
 quat_lattice_mul_mlll(quat_lattice_t *res,
                       const quat_lattice_t *lat1,
                       const quat_lattice_t *lat2,
@@ -637,11 +839,18 @@ quat_lattice_mul_mlll(quat_lattice_t *res,
 {
     ibz_vec_4_t elem1, elem2, elem_res;
     ibz_vec_4_t generators[16];
-    int rank;
+    quat_lattice_t candidate;
+    int rank = 0;
+    int ok = 0;
+
+    if (res == NULL ||
+        !mlll_lattice_mul_products_fit(lat1, lat2, alg))
+        return 0;
 
     ibz_vec_4_init(&elem1);
     ibz_vec_4_init(&elem2);
     ibz_vec_4_init(&elem_res);
+    quat_lattice_init(&candidate);
     for (int i = 0; i < 16; i++)
         ibz_vec_4_init(&generators[i]);
 
@@ -657,17 +866,23 @@ quat_lattice_mul_mlll(quat_lattice_t *res,
         }
     }
 
-    quat_mlll(&(res->basis), &rank, generators, 16, alg);
-    assert(rank == 4);
+    quat_mlll(&candidate.basis, &rank, generators, 16, alg);
+    if (rank == 4) {
+        ibz_mul(&candidate.denom, &lat1->denom, &lat2->denom);
+        if (quat_lattice_reduce_denom(&candidate, &candidate)) {
+            ibz_mat_4x4_copy(&res->basis, &candidate.basis);
+            ibz_copy(&res->denom, &candidate.denom);
+            ok = 1;
+        }
+    }
 
-    ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
-    quat_lattice_reduce_denom(res, res);
-
+    quat_lattice_finalize(&candidate);
     ibz_vec_4_finalize(&elem1);
     ibz_vec_4_finalize(&elem2);
     ibz_vec_4_finalize(&elem_res);
     for (int i = 0; i < 16; i++)
         ibz_vec_4_finalize(&generators[i]);
+    return ok;
 }
 
 int
@@ -694,40 +909,28 @@ quat_lattice_intersect_mlll(quat_lattice_t *res,
     ibz_mat_4x4_init(&res_red);
 
     /* Paper lines 5-6: M_k <- LLL(M_k; delta=3/4) */
-    fprintf(stderr, "[IMLLL] L5 lat1 basis_max=%d denom=%d\n",
-        ibz_bitsize(&lat1->basis[0][0]), ibz_bitsize(&lat1->denom)); fflush(stderr);
-    quat_lattice_lll(&(lat1_red.basis), lat1, alg);
+    if (!quat_lattice_lll(&(lat1_red.basis), lat1, alg))
+        goto cleanup;
     ibz_copy(&(lat1_red.denom), &(lat1->denom));
-    fprintf(stderr, "[IMLLL] L5 done basis_max=%d\n",
-        ibz_bitsize(&lat1_red.basis[0][0])); fflush(stderr);
 
-    fprintf(stderr, "[IMLLL] L6 lat2 basis_max=%d\n", ibz_bitsize(&lat2->basis[0][0])); fflush(stderr);
-    quat_lattice_lll(&(lat2_red.basis), lat2, alg);
+    if (!quat_lattice_lll(&(lat2_red.basis), lat2, alg))
+        goto cleanup;
     ibz_copy(&(lat2_red.denom), &(lat2->denom));
-    fprintf(stderr, "[IMLLL] L6 done basis_max=%d\n",
-        ibz_bitsize(&lat2_red.basis[0][0])); fflush(stderr);
 
     /* Paper lines 7-12: duals, sum via MLLL, dual back */
-    fprintf(stderr, "[IMLLL] L7 dual1\n"); fflush(stderr);
-    quat_lattice_dual_without_hnf(&dual1, &lat1_red);
-    fprintf(stderr, "[IMLLL] L8 dual2\n"); fflush(stderr);
-    quat_lattice_dual_without_hnf(&dual2, &lat2_red);
-    fprintf(stderr, "[IMLLL] L11 add_mlll dual1.basis=%d dual2.basis=%d\n",
-        ibz_bitsize(&dual1.basis[0][0]), ibz_bitsize(&dual2.basis[0][0])); fflush(stderr);
+    if (!quat_lattice_dual_without_hnf(&dual1, &lat1_red) ||
+        !quat_lattice_dual_without_hnf(&dual2, &lat2_red))
+        goto cleanup;
     if (!quat_lattice_add_mlll(&dual_res, &dual1, &dual2, alg)) {
         goto cleanup;
     }
-    fprintf(stderr, "[IMLLL] L11 done basis_max=%d\n",
-        ibz_bitsize(&dual_res.basis[0][0])); fflush(stderr);
-    fprintf(stderr, "[IMLLL] L12 dual_back\n"); fflush(stderr);
-    quat_lattice_dual_without_hnf(&candidate, &dual_res);
-    fprintf(stderr, "[IMLLL] L12 done basis_max=%d\n", ibz_bitsize(&candidate.basis[0][0])); fflush(stderr);
+    if (!quat_lattice_dual_without_hnf(&candidate, &dual_res))
+        goto cleanup;
 
     /* Paper line 14: gamma <- LLL(gamma; delta=3/4) */
-    fprintf(stderr, "[IMLLL] L14 final LLL basis_max=%d\n", ibz_bitsize(&candidate.basis[0][0])); fflush(stderr);
-    quat_lattice_lll(&res_red, &candidate, alg);
+    if (!quat_lattice_lll(&res_red, &candidate, alg))
+        goto cleanup;
     ibz_mat_4x4_copy(&candidate.basis, &res_red);
-    fprintf(stderr, "[IMLLL] L14 done basis_max=%d\n", ibz_bitsize(&candidate.basis[0][0])); fflush(stderr);
 
     /* Publish only after every fallible rank-reduction step succeeded. */
     ibz_mat_4x4_copy(&res->basis, &candidate.basis);
@@ -763,7 +966,9 @@ quat_lattice_add_mlll_with_reducer(quat_lattice_t *res,
     quat_lattice_t candidate;
     int ok = 0;
 
-    if (reducer == NULL || !mlll_lattice_add_products_fit(lat1, lat2))
+    if (res == NULL || alg == NULL ||
+        ibz_cmp(&alg->p, &ibz_const_zero) <= 0 || reducer == NULL ||
+        !mlll_lattice_add_products_fit(lat1, lat2))
         return 0;
 
     for (int i = 0; i < 8; i++)
@@ -790,13 +995,14 @@ quat_lattice_add_mlll_with_reducer(quat_lattice_t *res,
                 ibz_copy(&candidate.basis[i][j], &reduced[j][i]);
 
         ibz_mul(&candidate.denom, &lat1->denom, &lat2->denom);
-        quat_lattice_reduce_denom(&candidate, &candidate);
-
-        /* The reducer may fail or return a non-full-rank result. Do not
-         * publish any part of the candidate until rank four is confirmed. */
-        ibz_mat_4x4_copy(&res->basis, &candidate.basis);
-        ibz_copy(&res->denom, &candidate.denom);
-        ok = 1;
+        if (quat_lattice_reduce_denom(&candidate, &candidate)) {
+            /* The reducer may fail or return a non-full-rank result. Do not
+             * publish any part of the candidate until rank four and a valid
+             * denominator normalization are confirmed. */
+            ibz_mat_4x4_copy(&res->basis, &candidate.basis);
+            ibz_copy(&res->denom, &candidate.denom);
+            ok = 1;
+        }
     }
 
     quat_lattice_finalize(&candidate);

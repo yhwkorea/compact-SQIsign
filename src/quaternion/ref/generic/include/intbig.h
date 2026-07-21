@@ -29,14 +29,14 @@ extern "C"
 #define _IBZ_CONCAT(a, b) a##b
 #define _IBZ_CONCAT2(a, b) _IBZ_CONCAT(a, b)
 
-#define IBZ_LIMBS_lvl1 28  /* NIST Level I */
-#define IBZ_LIMBS_lvl3 43  /* NIST Level III */
-#define IBZ_LIMBS_lvl5 56  /* NIST Level V */
+#define IBZ_LIMBS_lvl1 28  /* NIST Level I:   1792 total bits */
+#define IBZ_LIMBS_lvl3 43  /* NIST Level III: 2752 total bits */
+#define IBZ_LIMBS_lvl5 56  /* NIST Level V:   3584 total bits */
 
 #ifdef SQISIGN_VARIANT
 #define IBZ_LIMBS _IBZ_CONCAT2(IBZ_LIMBS_, SQISIGN_VARIANT)
 #else
-#define IBZ_LIMBS 222  /* Default to NIST Level V if SQISIGN_VARIANT unset */
+#define IBZ_LIMBS IBZ_LIMBS_lvl5 /* Conservative standalone default: Level V */
 #endif
 #endif
 
@@ -59,12 +59,15 @@ extern "C"
 
 
     void ibz_neg(ibz_t *neg, const ibz_t *a);
+    /** Absolute value.  For the sole unrepresentable value -2^(IBZ_BITS-1),
+     * its unsigned magnitude bit pattern (the same ibz_t value) is retained. */
     void ibz_abs(ibz_t *abs, const ibz_t *a);
 
     void ibz_add(ibz_t *sum, const ibz_t *a, const ibz_t *b);
     void ibz_sub(ibz_t *diff, const ibz_t *a, const ibz_t *b);
     void ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b);
 
+    /** Divide by 2^exp, truncating toward zero. */
     void ibz_div_2exp(ibz_t *quotient, const ibz_t *a, uint32_t exp);
     void ibz_mul_2exp(ibz_t *result, const ibz_t *a, size_t shift);
 
@@ -82,11 +85,20 @@ extern "C"
 
     int ibz_cmp_int32(const ibz_t *x, int32_t y);
     int ibz_bitsize(const ibz_t *a);
+    /** Number of base-2^64 digits needed for |a| (one for zero). */
+    size_t ibz_digits_required(const ibz_t *a);
+    /** Export |a| to exactly target_len available digits, clearing unused
+     * digits.  Returns zero without a partial value when the buffer is too
+     * short, and one on success. */
+    int ibz_to_digits_checked(digit_t *digits, size_t target_len, const ibz_t *a);
+    /** Legacy magnitude export.  The caller must provide at least
+     * ibz_digits_required(a) digits. */
     void ibz_to_digits(digit_t *digits, const ibz_t *a);
 
-    /** @brief generate random value in [a, b]
-     *  assumed that a >= 0 and b >= 0 and a < b
-     * @returns 1 on success, 0 on failiure
+    /** @brief generate a random value in the inclusive interval [a, b]
+     *  The interval must be ordered and its width must fit the positive
+     *  signed ibz_t range.
+     * @returns 1 on success, 0 on failure
      */
     int ibz_rand_interval(ibz_t *rand, const ibz_t *a, const ibz_t *b);
 
@@ -99,7 +111,7 @@ extern "C"
 #define ibz_to_digit_array(T, I)                                                                                       \
     do {                                                                                                               \
         memset((T), 0, sizeof(T));                                                                                     \
-        ibz_to_digits((T), (I));                                                                                       \
+        (void)ibz_to_digits_checked((T), sizeof(T) / sizeof(*(T)), (I));                                                \
     } while (0)
     void ibz_copy_digits(ibz_t *a, const digit_t *digits, size_t len);
 #define ibz_copy_digit_array(I, T)                                                                                     \
@@ -110,17 +122,25 @@ extern "C"
 
     int ibz_two_adic(ibz_t *pow);
 
+    /** Truncating division.  Division by zero terminates the process. */
     void ibz_div(ibz_t *quotient, ibz_t *remainder, const ibz_t *a, const ibz_t *b);
 
+    /** Floor division; the nonzero remainder has the divisor's sign.
+     * Division by zero terminates the process. */
     void ibz_div_floor(ibz_t *q, ibz_t *r, const ibz_t *n, const ibz_t *d);
 
+    /** Floor remainder.  A zero modulus terminates the process. */
     void ibz_mod(ibz_t *r, const ibz_t *a, const ibz_t *b);
     unsigned long ibz_mod_ui(const ibz_t *n, unsigned long d);
 
     void ibz_pow(ibz_t *pow, const ibz_t *x, uint32_t e);
+    /** Modular exponentiation.  The modulus must be nonzero and the exponent
+     * nonnegative; violation of either precondition terminates the process. */
     void ibz_pow_mod(ibz_t *pow, const ibz_t *x, const ibz_t *e, const ibz_t *m);
 
 
+    /** Greatest common divisor.  If the mathematical result is
+     * 2^(IBZ_BITS-1), its unsigned magnitude bit pattern is returned. */
     void ibz_gcd(ibz_t *gcd, const ibz_t *a, const ibz_t *b);
     void ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y, const ibz_t *a, const ibz_t *b);
 

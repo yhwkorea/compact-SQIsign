@@ -2,7 +2,7 @@
 #ifndef SQISIGN_NAMESPACE_H
 #define SQISIGN_NAMESPACE_H
 
-#define DISABLE_NAMESPACING
+//#define DISABLE_NAMESPACING
 
 #if defined(_WIN32)
 #define SQISIGN_API __declspec(dllexport)
@@ -55,7 +55,9 @@
 #undef quat_alg_init_set_ui
 #undef quat_alg_make_primitive
 #undef quat_alg_mul
+#undef quat_alg_mul_mod
 #undef quat_alg_norm
+#undef quat_alg_norm_mod
 #undef quat_alg_normalize
 #undef quat_alg_scalar
 #undef quat_alg_sub
@@ -73,7 +75,9 @@
 #define quat_alg_init_set_ui                            SQISIGN_NAMESPACE_GENERIC(quat_alg_init_set_ui)
 #define quat_alg_make_primitive                         SQISIGN_NAMESPACE_GENERIC(quat_alg_make_primitive)
 #define quat_alg_mul                                    SQISIGN_NAMESPACE_GENERIC(quat_alg_mul)
+#define quat_alg_mul_mod                                SQISIGN_NAMESPACE_GENERIC(quat_alg_mul_mod)
 #define quat_alg_norm                                   SQISIGN_NAMESPACE_GENERIC(quat_alg_norm)
+#define quat_alg_norm_mod                               SQISIGN_NAMESPACE_GENERIC(quat_alg_norm_mod)
 #define quat_alg_normalize                              SQISIGN_NAMESPACE_GENERIC(quat_alg_normalize)
 #define quat_alg_scalar                                 SQISIGN_NAMESPACE_GENERIC(quat_alg_scalar)
 #define quat_alg_sub                                    SQISIGN_NAMESPACE_GENERIC(quat_alg_sub)
@@ -145,11 +149,13 @@
 
 // Namespacing symbols exported from dim2id2iso.c:
 #undef dim2id2iso_arbitrary_isogeny_evaluation
+#undef dim2id2iso_enumerate_hypercube_regression_test
 #undef dim2id2iso_ideal_to_isogeny_clapotis
 #undef find_uv
 #undef fixed_degree_isogeny_and_eval
 
 #define dim2id2iso_arbitrary_isogeny_evaluation         SQISIGN_NAMESPACE(dim2id2iso_arbitrary_isogeny_evaluation)
+#define dim2id2iso_enumerate_hypercube_regression_test  SQISIGN_NAMESPACE(dim2id2iso_enumerate_hypercube_regression_test)
 #define dim2id2iso_ideal_to_isogeny_clapotis            SQISIGN_NAMESPACE(dim2id2iso_ideal_to_isogeny_clapotis)
 #define find_uv                                         SQISIGN_NAMESPACE(find_uv)
 #define fixed_degree_isogeny_and_eval                   SQISIGN_NAMESPACE(fixed_degree_isogeny_and_eval)
@@ -212,6 +218,13 @@
 #define ibz_vec_4_set                                   SQISIGN_NAMESPACE_GENERIC(ibz_vec_4_set)
 #define ibz_vec_4_sub                                   SQISIGN_NAMESPACE_GENERIC(ibz_vec_4_sub)
 #define quat_qf_eval                                    SQISIGN_NAMESPACE_GENERIC(quat_qf_eval)
+
+// Namespacing symbols exported from dpe.c:
+#undef dpe_get_z
+#undef dpe_set_z
+
+#define dpe_get_z                                       SQISIGN_NAMESPACE_GENERIC(dpe_get_z)
+#define dpe_set_z                                       SQISIGN_NAMESPACE_GENERIC(dpe_set_z)
 
 // Namespacing symbols exported from ec.c:
 #undef cswap_points
@@ -607,6 +620,7 @@
 #undef quat_lideal_copy
 #undef quat_lideal_create
 #undef quat_lideal_create_principal
+#undef quat_lideal_create_with_norm
 #undef quat_lideal_equals
 #undef quat_lideal_generator
 #undef quat_lideal_inter
@@ -624,6 +638,7 @@
 #define quat_lideal_copy                                SQISIGN_NAMESPACE_GENERIC(quat_lideal_copy)
 #define quat_lideal_create                              SQISIGN_NAMESPACE_GENERIC(quat_lideal_create)
 #define quat_lideal_create_principal                    SQISIGN_NAMESPACE_GENERIC(quat_lideal_create_principal)
+#define quat_lideal_create_with_norm                    SQISIGN_NAMESPACE_GENERIC(quat_lideal_create_with_norm)
 #define quat_lideal_equals                              SQISIGN_NAMESPACE_GENERIC(quat_lideal_equals)
 #define quat_lideal_generator                           SQISIGN_NAMESPACE_GENERIC(quat_lideal_generator)
 #define quat_lideal_inter                               SQISIGN_NAMESPACE_GENERIC(quat_lideal_inter)
@@ -648,12 +663,15 @@
 #undef ibz_div_2exp
 #undef ibz_div_floor
 #undef ibz_divides
+#undef ibz_digits_required
 #undef ibz_finalize
 #undef ibz_gcd
+#undef ibz_gcdext
 #undef ibz_get
 #undef ibz_init
 #undef ibz_invmod
 #undef ibz_is_even
+#undef ibz_is_negative
 #undef ibz_is_odd
 #undef ibz_is_one
 #undef ibz_is_zero
@@ -661,6 +679,7 @@
 #undef ibz_mod
 #undef ibz_mod_ui
 #undef ibz_mul
+#undef ibz_mul_2exp
 #undef ibz_neg
 #undef ibz_pow
 #undef ibz_pow_mod
@@ -672,6 +691,7 @@
 #undef ibz_rand_interval_minm_m
 #undef ibz_set
 #undef ibz_set_from_str
+#undef ibz_set_u64
 #undef ibz_size_in_base
 #undef ibz_sqrt
 #undef ibz_sqrt_floor
@@ -679,6 +699,7 @@
 #undef ibz_sub
 #undef ibz_swap
 #undef ibz_to_digits
+#undef ibz_to_digits_checked
 #undef ibz_two_adic
 
 #define ibz_abs                                         SQISIGN_NAMESPACE_GENERIC(ibz_abs)
@@ -693,12 +714,15 @@
 #define ibz_div_2exp                                    SQISIGN_NAMESPACE_GENERIC(ibz_div_2exp)
 #define ibz_div_floor                                   SQISIGN_NAMESPACE_GENERIC(ibz_div_floor)
 #define ibz_divides                                     SQISIGN_NAMESPACE_GENERIC(ibz_divides)
+#define ibz_digits_required                             SQISIGN_NAMESPACE_GENERIC(ibz_digits_required)
 #define ibz_finalize                                    SQISIGN_NAMESPACE_GENERIC(ibz_finalize)
 #define ibz_gcd                                         SQISIGN_NAMESPACE_GENERIC(ibz_gcd)
+#define ibz_gcdext                                      SQISIGN_NAMESPACE_GENERIC(ibz_gcdext)
 #define ibz_get                                         SQISIGN_NAMESPACE_GENERIC(ibz_get)
 #define ibz_init                                        SQISIGN_NAMESPACE_GENERIC(ibz_init)
 #define ibz_invmod                                      SQISIGN_NAMESPACE_GENERIC(ibz_invmod)
 #define ibz_is_even                                     SQISIGN_NAMESPACE_GENERIC(ibz_is_even)
+#define ibz_is_negative                                 SQISIGN_NAMESPACE_GENERIC(ibz_is_negative)
 #define ibz_is_odd                                      SQISIGN_NAMESPACE_GENERIC(ibz_is_odd)
 #define ibz_is_one                                      SQISIGN_NAMESPACE_GENERIC(ibz_is_one)
 #define ibz_is_zero                                     SQISIGN_NAMESPACE_GENERIC(ibz_is_zero)
@@ -706,6 +730,7 @@
 #define ibz_mod                                         SQISIGN_NAMESPACE_GENERIC(ibz_mod)
 #define ibz_mod_ui                                      SQISIGN_NAMESPACE_GENERIC(ibz_mod_ui)
 #define ibz_mul                                         SQISIGN_NAMESPACE_GENERIC(ibz_mul)
+#define ibz_mul_2exp                                    SQISIGN_NAMESPACE_GENERIC(ibz_mul_2exp)
 #define ibz_neg                                         SQISIGN_NAMESPACE_GENERIC(ibz_neg)
 #define ibz_pow                                         SQISIGN_NAMESPACE_GENERIC(ibz_pow)
 #define ibz_pow_mod                                     SQISIGN_NAMESPACE_GENERIC(ibz_pow_mod)
@@ -717,6 +742,7 @@
 #define ibz_rand_interval_minm_m                        SQISIGN_NAMESPACE_GENERIC(ibz_rand_interval_minm_m)
 #define ibz_set                                         SQISIGN_NAMESPACE_GENERIC(ibz_set)
 #define ibz_set_from_str                                SQISIGN_NAMESPACE_GENERIC(ibz_set_from_str)
+#define ibz_set_u64                                     SQISIGN_NAMESPACE_GENERIC(ibz_set_u64)
 #define ibz_size_in_base                                SQISIGN_NAMESPACE_GENERIC(ibz_size_in_base)
 #define ibz_sqrt                                        SQISIGN_NAMESPACE_GENERIC(ibz_sqrt)
 #define ibz_sqrt_floor                                  SQISIGN_NAMESPACE_GENERIC(ibz_sqrt_floor)
@@ -724,6 +750,7 @@
 #define ibz_sub                                         SQISIGN_NAMESPACE_GENERIC(ibz_sub)
 #define ibz_swap                                        SQISIGN_NAMESPACE_GENERIC(ibz_swap)
 #define ibz_to_digits                                   SQISIGN_NAMESPACE_GENERIC(ibz_to_digits)
+#define ibz_to_digits_checked                           SQISIGN_NAMESPACE_GENERIC(ibz_to_digits_checked)
 #define ibz_two_adic                                    SQISIGN_NAMESPACE_GENERIC(ibz_two_adic)
 
 // Namespacing symbols exported from integers.c:
@@ -756,9 +783,11 @@
 // Namespacing symbols exported from l2.c:
 #undef quat_lattice_lll
 #undef quat_lll_core
+#undef quat_lll_core_checked
 
 #define quat_lattice_lll                                SQISIGN_NAMESPACE_GENERIC(quat_lattice_lll)
 #define quat_lll_core                                   SQISIGN_NAMESPACE_GENERIC(quat_lll_core)
+#define quat_lll_core_checked                           SQISIGN_NAMESPACE_GENERIC(quat_lll_core_checked)
 
 // Namespacing symbols exported from lat_ball.c:
 #undef quat_lattice_bound_parallelogram
@@ -819,6 +848,34 @@
 #define quat_lll_gram_schmidt_transposed_with_ibq       SQISIGN_NAMESPACE_GENERIC(quat_lll_gram_schmidt_transposed_with_ibq)
 #define quat_lll_set_ibq_parameters                     SQISIGN_NAMESPACE_GENERIC(quat_lll_set_ibq_parameters)
 #define quat_lll_verify                                 SQISIGN_NAMESPACE_GENERIC(quat_lll_verify)
+
+// Namespacing symbols exported from mlll.c:
+#undef quat_lattice_add_mlll
+#undef quat_lattice_add_mlll_with_reducer
+#undef quat_lattice_intersect_mlll
+#undef quat_lattice_mul_mlll
+#undef quat_mlll
+
+#define quat_lattice_add_mlll                           SQISIGN_NAMESPACE_GENERIC(quat_lattice_add_mlll)
+#define quat_lattice_add_mlll_with_reducer              SQISIGN_NAMESPACE_GENERIC(quat_lattice_add_mlll_with_reducer)
+#define quat_lattice_intersect_mlll                     SQISIGN_NAMESPACE_GENERIC(quat_lattice_intersect_mlll)
+#define quat_lattice_mul_mlll                           SQISIGN_NAMESPACE_GENERIC(quat_lattice_mul_mlll)
+#define quat_mlll                                       SQISIGN_NAMESPACE_GENERIC(quat_mlll)
+
+// Namespacing symbols exported from ml2.c:
+#undef quat_ml2
+#undef quat_ml2_mlll_with_reducer
+#undef quat_ml2_profile_get
+#undef quat_ml2_profile_reset
+#undef quat_ml2_retry
+#undef quat_ml2_retry_with_reducer
+
+#define quat_ml2                                        SQISIGN_NAMESPACE_GENERIC(quat_ml2)
+#define quat_ml2_mlll_with_reducer                      SQISIGN_NAMESPACE_GENERIC(quat_ml2_mlll_with_reducer)
+#define quat_ml2_profile_get                            SQISIGN_NAMESPACE_GENERIC(quat_ml2_profile_get)
+#define quat_ml2_profile_reset                          SQISIGN_NAMESPACE_GENERIC(quat_ml2_profile_reset)
+#define quat_ml2_retry                                  SQISIGN_NAMESPACE_GENERIC(quat_ml2_retry)
+#define quat_ml2_retry_with_reducer                     SQISIGN_NAMESPACE_GENERIC(quat_ml2_retry_with_reducer)
 
 // Namespacing symbols exported from mem.c:
 #undef sqisign_secure_clear
@@ -1019,4 +1076,3 @@
 
 
 #endif
-

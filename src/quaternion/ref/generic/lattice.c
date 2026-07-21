@@ -36,14 +36,20 @@ quat_lattice_equal(const quat_lattice_t *lat1, const quat_lattice_t *lat2)
     quat_lattice_t a, b;
     quat_lattice_init(&a);
     quat_lattice_init(&b);
-    quat_lattice_reduce_denom(&a, lat1);
-    quat_lattice_reduce_denom(&b, lat2);
+    if (!quat_lattice_reduce_denom(&a, lat1) ||
+        !quat_lattice_reduce_denom(&b, lat2)) {
+        equal = 0;
+        goto cleanup;
+    }
     ibz_abs(&(a.denom), &(a.denom));
     ibz_abs(&(b.denom), &(b.denom));
-    quat_lattice_hnf(&a);
-    quat_lattice_hnf(&b);
+    if (!quat_lattice_hnf(&a) || !quat_lattice_hnf(&b)) {
+        equal = 0;
+        goto cleanup;
+    }
     equal = equal && (ibz_cmp(&(a.denom), &(b.denom)) == 0);
     equal = equal && ibz_mat_4x4_equal(&(a.basis), &(b.basis));
+cleanup:
     quat_lattice_finalize(&a);
     quat_lattice_finalize(&b);
     return (equal);
@@ -61,17 +67,35 @@ quat_lattice_inclusion(const quat_lattice_t *sublat, const quat_lattice_t *overl
     return (res);
 }
 
-void
+int
 quat_lattice_reduce_denom(quat_lattice_t *reduced, const quat_lattice_t *lat)
 {
-    ibz_t gcd;
+    int ok = 0;
+    ibz_t gcd, remainder, candidate_denom;
+    ibz_mat_4x4_t candidate_basis;
     ibz_init(&gcd);
+    ibz_init(&remainder);
+    ibz_init(&candidate_denom);
+    ibz_mat_4x4_init(&candidate_basis);
     ibz_mat_4x4_gcd(&gcd, &(lat->basis));
     ibz_gcd(&gcd, &gcd, &(lat->denom));
-    ibz_mat_4x4_scalar_div(&(reduced->basis), &gcd, &(lat->basis));
-    ibz_div(&(reduced->denom), &gcd, &(lat->denom), &gcd);
-    ibz_abs(&(reduced->denom), &(reduced->denom));
+    if (ibz_is_zero(&gcd) ||
+        !ibz_mat_4x4_scalar_div(&candidate_basis, &gcd, &(lat->basis)))
+        goto cleanup;
+    ibz_div(&candidate_denom, &remainder, &(lat->denom), &gcd);
+    if (!ibz_is_zero(&remainder) || ibz_is_zero(&candidate_denom))
+        goto cleanup;
+    ibz_abs(&candidate_denom, &candidate_denom);
+    ibz_mat_4x4_copy(&reduced->basis, &candidate_basis);
+    ibz_copy(&reduced->denom, &candidate_denom);
+    ok = 1;
+
+cleanup:
+    ibz_mat_4x4_finalize(&candidate_basis);
+    ibz_finalize(&candidate_denom);
+    ibz_finalize(&remainder);
     ibz_finalize(&gcd);
+    return ok;
 }
 
 void
@@ -89,28 +113,44 @@ quat_lattice_conjugate_without_hnf(quat_lattice_t *conj, const quat_lattice_t *l
 
 // Method described in https://cseweb.ucsd.edu/classes/sp14/cse206A-a/lec4.pdf consulted on 19 of
 // May 2023, 12h40 CEST
-void
+int
 quat_lattice_dual_without_hnf(quat_lattice_t *dual, const quat_lattice_t *lat)
 {
     /* paper Algorithm LatticeDual (91proof.tex:435): (A, Delta) = adj+det,
      * M^# = r * A^T, r^# = Delta, then GCD-normalize (Lines 7-8). The GCD
      * step is essential for the paper bound lem:dual-bound; without it,
      * dual.basis can grow to 4*|entry| bits (cofactor expansion). */
+    if (dual == NULL || lat == NULL || ibz_is_zero(&lat->denom))
+        return 0;
+
+    int ok = 0;
     ibz_mat_4x4_t inv;
     ibz_t det;
+    quat_lattice_t candidate;
     ibz_init(&det);
     ibz_mat_4x4_init(&inv);
-    ibz_mat_4x4_inv_with_det_as_denom(&inv, &det, &(lat->basis));
+    quat_lattice_init(&candidate);
+    if (!ibz_mat_4x4_inv_with_det_as_denom(&inv, &det, &(lat->basis))) {
+        goto cleanup;
+    }
     ibz_mat_4x4_transpose(&inv, &inv);
     // dual_denom = det/lat_denom
-    ibz_mat_4x4_scalar_mul(&(dual->basis), &(lat->denom), &inv);
-    ibz_copy(&(dual->denom), &det);
+    ibz_mat_4x4_scalar_mul(&candidate.basis, &(lat->denom), &inv);
+    ibz_copy(&candidate.denom, &det);
 
     /* paper Line 7-8: GCD normalization */
-    quat_lattice_reduce_denom(dual, dual);
+    if (!quat_lattice_reduce_denom(&candidate, &candidate))
+        goto cleanup;
 
+    ibz_mat_4x4_copy(&dual->basis, &candidate.basis);
+    ibz_copy(&dual->denom, &candidate.denom);
+    ok = 1;
+
+cleanup:
+    quat_lattice_finalize(&candidate);
     ibz_finalize(&det);
     ibz_mat_4x4_finalize(&inv);
+    return ok;
 }
 
 int
@@ -118,27 +158,14 @@ quat_lattice_add(quat_lattice_t *res, const quat_lattice_t *lat1, const quat_lat
 {
     ibz_vec_4_t generators[8];
     ibz_mat_4x4_t tmp;
+    quat_lattice_t candidate;
     int ok = 0;
     if (!quat_lattice_add_products_fit(lat1, lat2))
         return 0;
     for (int i = 0; i < 8; i++)
         ibz_vec_4_init(&(generators[i]));
     ibz_mat_4x4_init(&tmp);
-
-    /* Issue 17 trace: log input sizes */
-    {
-        int max1 = 0, max2 = 0;
-        for (int i = 0; i < 4; i++)
-            for (int j = 0; j < 4; j++) {
-                int b1 = ibz_bitsize(&(lat1->basis[i][j]));
-                int b2 = ibz_bitsize(&(lat2->basis[i][j]));
-                if (b1 > max1) max1 = b1;
-                if (b2 > max2) max2 = b2;
-            }
-        fprintf(stderr, "[LATTICE-ADD] lat1.basis_max=%d lat1.denom=%d lat2.basis_max=%d lat2.denom=%d\n",
-            max1, ibz_bitsize(&(lat1->denom)), max2, ibz_bitsize(&(lat2->denom)));
-        fflush(stderr);
-    }
+    quat_lattice_init(&candidate);
 
     ibz_mat_4x4_scalar_mul(&tmp, &(lat1->denom), &(lat2->basis));
     for (int i = 0; i < 4; i++) {
@@ -163,14 +190,18 @@ quat_lattice_add(quat_lattice_t *res, const quat_lattice_t *lat1, const quat_lat
         if (rho == 4) {
             for (int j = 0; j < 4; j++)
                 for (int i = 0; i < 4; i++)
-                    ibz_copy(&(res->basis[i][j]), &reduced[j][i]);
-            ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
-            quat_lattice_reduce_denom(res, res);
-            ok = 1;
+                    ibz_copy(&candidate.basis[i][j], &reduced[j][i]);
+            ibz_mul(&candidate.denom, &(lat1->denom), &(lat2->denom));
+            if (quat_lattice_reduce_denom(&candidate, &candidate)) {
+                ibz_mat_4x4_copy(&res->basis, &candidate.basis);
+                ibz_copy(&res->denom, &candidate.denom);
+                ok = 1;
+            }
         }
         for (int i = 0; i < 4; i++)
             ibz_vec_4_finalize(&reduced[i]);
     }
+    quat_lattice_finalize(&candidate);
     ibz_mat_4x4_finalize(&tmp);
     for (int i = 0; i < 8; i++)
         ibz_vec_4_finalize(&(generators[i]));
@@ -187,12 +218,13 @@ quat_lattice_intersect(quat_lattice_t *res, const quat_lattice_t *lat1, const qu
     quat_lattice_init(&dual1);
     quat_lattice_init(&dual2);
     quat_lattice_init(&dual_res);
-    quat_lattice_dual_without_hnf(&dual1, lat1);
-
-    quat_lattice_dual_without_hnf(&dual2, lat2);
+    if (!quat_lattice_dual_without_hnf(&dual1, lat1) ||
+        !quat_lattice_dual_without_hnf(&dual2, lat2))
+        goto cleanup;
     if (!quat_lattice_add(&dual_res, &dual1, &dual2))
         goto cleanup;
-    quat_lattice_dual_without_hnf(res, &dual_res);
+    if (!quat_lattice_dual_without_hnf(res, &dual_res))
+        goto cleanup;
     /* paper Issue 8 (2026-05-17): removed the redundant final HNF.
      * The lattice basis is already a valid (non-HNF) basis; consumers via
      * sample_response only need a basis matrix, not a unique form. Original
@@ -227,14 +259,18 @@ quat_lattice_mat_alg_coord_mul_without_hnf(ibz_mat_4x4_t *prod,
     ibz_vec_4_finalize(&a);
 }
 
-void
+int
 quat_lattice_alg_elem_mul(quat_lattice_t *prod,
                           const quat_lattice_t *lat,
                           const quat_alg_elem_t *elem,
                           const quat_alg_t *alg)
 {
-    quat_lattice_mat_alg_coord_mul_without_hnf(&(prod->basis), &(lat->basis), &(elem->coord), alg);
-    ibz_mul(&(prod->denom), &(lat->denom), &(elem->denom));
+    quat_lattice_t candidate;
+    int ok = 0;
+    quat_lattice_init(&candidate);
+    quat_lattice_mat_alg_coord_mul_without_hnf(
+        &candidate.basis, &lat->basis, &elem->coord, alg);
+    ibz_mul(&candidate.denom, &lat->denom, &elem->denom);
     /* paper Issue 8 extension (replaces quat_lattice_hnf): use ML2 on the
      * 4 column generators to obtain a LLL-reduced basis of the lattice
      * (without cofactor blow-up). Columns of prod->basis ARE the generators. */
@@ -244,22 +280,30 @@ quat_lattice_alg_elem_mul(quat_lattice_t *prod,
             ibz_vec_4_init(&gens[i]);
             ibz_vec_4_init(&reduced[i]);
             for (int j = 0; j < 4; j++)
-                ibz_copy(&gens[i][j], &(prod->basis[j][i]));
+                ibz_copy(&gens[i][j], &candidate.basis[j][i]);
         }
         int rho = quat_ml2_retry(reduced, 4, gens, 4, alg);
         if (rho == 4) {
             for (int i = 0; i < 4; i++)
                 for (int j = 0; j < 4; j++)
-                    ibz_copy(&(prod->basis[j][i]), &reduced[i][j]);
-        } else {
-            fprintf(stderr, "[ALG_ELEM_MUL] ML2 returned rho=%d (!=4), keeping un-reduced basis\n", rho);
+                    ibz_copy(&candidate.basis[j][i], &reduced[i][j]);
         }
         for (int i = 0; i < 4; i++) {
             ibz_vec_4_finalize(&gens[i]);
             ibz_vec_4_finalize(&reduced[i]);
         }
+        if (rho != 4)
+            goto cleanup;
     }
-    quat_lattice_reduce_denom(prod, prod);
+    if (!quat_lattice_reduce_denom(&candidate, &candidate))
+        goto cleanup;
+    ibz_mat_4x4_copy(&prod->basis, &candidate.basis);
+    ibz_copy(&prod->denom, &candidate.denom);
+    ok = 1;
+
+cleanup:
+    quat_lattice_finalize(&candidate);
+    return ok;
 }
 
 int
@@ -292,9 +336,9 @@ quat_lattice_mul(quat_lattice_t *res,
     int use_ml2 = hnfmod_bound > IBZ_BITS - 1 ||
                   2 * hnfmod_bound + safety_margin > IBZ_BITS;
 
-    assert(ibz_cmp(norm1, &ibz_const_zero) > 0);
-    assert(ibz_cmp(norm2, &ibz_const_zero) > 0);
-    if (generator_product_bound > IBZ_BITS - 1 ||
+    if (ibz_cmp(norm1, &ibz_const_zero) <= 0 ||
+        ibz_cmp(norm2, &ibz_const_zero) <= 0 ||
+        generator_product_bound > IBZ_BITS - 1 ||
         denom1_bits + denom2_bits > IBZ_BITS - 1)
         return 0;
 
@@ -358,18 +402,6 @@ quat_lattice_mul(quat_lattice_t *res,
     // ibz_finalize(&t1);
     // ibz_finalize(&t2);
 
-    {
-        int gmax = 0;
-        for (int g = 0; g < 16; g++)
-            for (int c = 0; c < 4; c++) {
-                int b = ibz_bitsize(&(generators[g][c]));
-                if (b > gmax) gmax = b;
-            }
-        int reported_hnfmod_bits = use_ml2 ? hnfmod_bound : ibz_bitsize(&hnfmod);
-        fprintf(stderr, "[LMUL] enter hnfmod_bits<=%d gen_max_bit=%d (transient mul ~= 2*hnfmod = %d)\n",
-                reported_hnfmod_bits, gmax, 2 * reported_hnfmod_bits);
-        fflush(stderr);
-    }
     /* paper Issue 11/12 spec: when HNF mod core's m^2 transient would exceed
      * the IBZ_BITS cap, fall through to the spec-faithful "form bar(J_t)·I
      * product, run LLL directly on its 16 column generators" path via
@@ -383,7 +415,6 @@ quat_lattice_mul(quat_lattice_t *res,
      * 110-limb had a known regression (oscillation in dpe precision), so we
      * only invoke it when forced by the cap. */
     {
-        int hnfmod_bits = use_ml2 ? hnfmod_bound : ibz_bitsize(&hnfmod);
         if (use_ml2) {
             ibz_vec_4_t reduced[4];
             for (int i = 0; i < 4; i++)
@@ -392,24 +423,25 @@ quat_lattice_mul(quat_lattice_t *res,
             if (rho == 4) {
                 for (int j = 0; j < 4; j++)
                     for (int i = 0; i < 4; i++)
-                        ibz_copy(&(res->basis[i][j]), &reduced[j][i]);
-                fprintf(stderr, "[LMUL] ML2(d=16) ok, rho=%d (forced: 2*hnfmod=%d > IBZ_BITS=%d)\n",
-                        rho, 2 * hnfmod_bits, IBZ_BITS);
-                fflush(stderr);
+                        ibz_copy(&(lat_res.basis[i][j]), &reduced[j][i]);
                 ok = 1;
             }
             for (int i = 0; i < 4; i++)
                 ibz_vec_4_finalize(&reduced[i]);
         } else {
-            ibz_mat_4xn_hnf_mod_core(&(res->basis), 16, generators, &hnfmod);
+            ibz_mat_4xn_hnf_mod_core(&(lat_res.basis), 16, generators, &hnfmod);
             ok = 1;
         }
     }
     if (!ok)
         goto cleanup;
-    fprintf(stderr, "[LMUL] reduce returned\n"); fflush(stderr);
-    ibz_mul(&(res->denom), &(lat1->denom), &(lat2->denom));
-    quat_lattice_reduce_denom(res, res);
+    ibz_mul(&lat_res.denom, &lat1->denom, &lat2->denom);
+    if (!quat_lattice_reduce_denom(&lat_res, &lat_res)) {
+        ok = 0;
+        goto cleanup;
+    }
+    ibz_mat_4x4_copy(&res->basis, &lat_res.basis);
+    ibz_copy(&res->denom, &lat_res.denom);
 cleanup:
     ibz_vec_4_finalize(&elem1);
     ibz_vec_4_finalize(&elem2);
@@ -437,18 +469,20 @@ quat_lattice_contains(ibz_vec_4_t *coord, const quat_lattice_t *lat, const quat_
     ibz_init(&det);
     ibz_vec_4_init(&work_coord);
     ibz_mat_4x4_init(&inv);
-    ibz_mat_4x4_inv_with_det_as_denom(&inv, &det, &(lat->basis));
-    assert(!ibz_is_zero(&det));
+    if (!ibz_mat_4x4_inv_with_det_as_denom(&inv, &det, &(lat->basis)))
+        goto cleanup;
     ibz_mat_4x4_eval(&work_coord, &inv, &(x->coord));
     ibz_vec_4_scalar_mul(&(work_coord), &(lat->denom), &work_coord);
     ibz_mul(&prod, &(x->denom), &det);
-    divisible = ibz_vec_4_scalar_div(&work_coord, &prod, &work_coord);
+    if (!ibz_is_zero(&prod))
+        divisible = ibz_vec_4_scalar_div(&work_coord, &prod, &work_coord);
     // copy result
     if (divisible && (coord != NULL)) {
         for (int i = 0; i < 4; i++) {
             ibz_copy(&((*coord)[i]), &(work_coord[i]));
         }
     }
+cleanup:
     ibz_finalize(&prod);
     ibz_finalize(&det);
     ibz_mat_4x4_finalize(&inv);
@@ -456,57 +490,88 @@ quat_lattice_contains(ibz_vec_4_t *coord, const quat_lattice_t *lat, const quat_
     return (divisible);
 }
 
-void
+int
 quat_lattice_index(ibz_t *index, const quat_lattice_t *sublat, const quat_lattice_t *overlat)
 {
-    ibz_t tmp, det;
+    int ok = 0;
+    ibz_t tmp, det, candidate;
+    if (index == NULL || sublat == NULL || overlat == NULL ||
+        ibz_is_zero(&sublat->denom) || ibz_is_zero(&overlat->denom))
+        return 0;
     ibz_init(&tmp);
     ibz_init(&det);
+    ibz_init(&candidate);
 
     // det = det(sublat->basis)
-    ibz_mat_4x4_inv_with_det_as_denom(NULL, &det, &sublat->basis);
+    if (!ibz_mat_4x4_inv_with_det_as_denom(NULL, &det, &sublat->basis))
+        goto cleanup;
     // tmp = (overlat->denom)⁴
     ibz_mul(&tmp, &overlat->denom, &overlat->denom);
     ibz_mul(&tmp, &tmp, &tmp);
     // index = (overlat->denom)⁴ · det(sublat->basis)
-    ibz_mul(index, &det, &tmp);
+    ibz_mul(&candidate, &det, &tmp);
     // tmp = (sublat->denom)⁴
     ibz_mul(&tmp, &sublat->denom, &sublat->denom);
     ibz_mul(&tmp, &tmp, &tmp);
     // det = det(overlat->basis)
-    ibz_mat_4x4_inv_with_det_as_denom(NULL, &det, &overlat->basis);
+    if (!ibz_mat_4x4_inv_with_det_as_denom(NULL, &det, &overlat->basis))
+        goto cleanup;
     // tmp = (sublat->denom)⁴ · det(overlat->basis)
     ibz_mul(&tmp, &tmp, &det);
     // index = index / tmp
-    ibz_div(index, &tmp, index, &tmp);
-    assert(ibz_is_zero(&tmp));
+    if (ibz_is_zero(&tmp))
+        goto cleanup;
+    ibz_div(&candidate, &tmp, &candidate, &tmp);
+    if (!ibz_is_zero(&tmp))
+        goto cleanup;
     // index = |index|
-    ibz_abs(index, index);
+    ibz_abs(&candidate, &candidate);
+    ibz_copy(index, &candidate);
+    ok = 1;
 
+cleanup:
+    ibz_finalize(&candidate);
     ibz_finalize(&tmp);
     ibz_finalize(&det);
+    return ok;
 }
 
-void
+int
 quat_lattice_hnf(quat_lattice_t *lat)
 {
     ibz_t mod;
     ibz_vec_4_t generators[4];
+    quat_lattice_t candidate;
+    int ok = 0;
     ibz_init(&mod);
-    ibz_mat_4x4_inv_with_det_as_denom(NULL, &mod, &(lat->basis));
+    quat_lattice_init(&candidate);
+    ibz_mat_4x4_copy(&candidate.basis, &lat->basis);
+    ibz_copy(&candidate.denom, &lat->denom);
+    if (!ibz_mat_4x4_inv_with_det_as_denom(NULL, &mod, &candidate.basis))
+        goto cleanup;
     ibz_abs(&mod, &mod);
+    if (ibz_is_zero(&mod))
+        goto cleanup;
     for (int i = 0; i < 4; i++)
         ibz_vec_4_init(&(generators[i]));
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
-            ibz_copy(&(generators[j][i]), &(lat->basis[i][j]));
+            ibz_copy(&(generators[j][i]), &(candidate.basis[i][j]));
         }
     }
-    ibz_mat_4xn_hnf_mod_core(&(lat->basis), 4, generators, &mod);
-    quat_lattice_reduce_denom(lat, lat);
-    ibz_finalize(&mod);
+    ibz_mat_4xn_hnf_mod_core(&candidate.basis, 4, generators, &mod);
+    if (quat_lattice_reduce_denom(&candidate, &candidate)) {
+        ibz_mat_4x4_copy(&lat->basis, &candidate.basis);
+        ibz_copy(&lat->denom, &candidate.denom);
+        ok = 1;
+    }
     for (int i = 0; i < 4; i++)
         ibz_vec_4_finalize(&(generators[i]));
+
+cleanup:
+    quat_lattice_finalize(&candidate);
+    ibz_finalize(&mod);
+    return ok;
 }
 
 void

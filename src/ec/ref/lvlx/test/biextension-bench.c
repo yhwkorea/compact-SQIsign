@@ -35,7 +35,11 @@ biextension_bench(uint64_t bench)
     ec_curve_normalize_A24(&curve);
 
     // Compute 2^e torsion on curve and copy to a second basis
-    (void)ec_curve_to_basis_2f_to_hint(&BPQ, &curve, e);
+    uint8_t hint;
+    if (!ec_curve_to_basis_2f_to_hint(&BPQ, &curve, e, &hint)) {
+        fprintf(stderr, "basis generation failed\n");
+        return;
+    }
     copy_basis(&BRS, &BPQ);
 
     // Benchmark doubling on the curve

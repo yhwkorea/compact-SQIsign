@@ -49,7 +49,7 @@ higher NIST levels.
 - `-DENABLE_KAT_TESTS=OFF` (default): keep stored-vector tests out of the
   normal correctness suite. `ON` enables Compact signature-verification
   fixtures; mismatching byte-for-byte replay is not registered.
-- `-DENABLE_ML2_PROFILE=OFF` (default): collect per-dimension first-failure,
+- `-DENABLE_ML2_PROFILE=OFF` (default): set this to `ON` to collect per-dimension first-failure,
   permutation-recovery, precision-rejection, and exhausted-retry counters in
   the signature test binaries.
 - `-DENABLE_INTBIG_OVERFLOW_CHECK=OFF` (default): instrument signed fixed-width

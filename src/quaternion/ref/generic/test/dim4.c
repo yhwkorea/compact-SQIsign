@@ -961,7 +961,11 @@ quat_test_dim4_ibz_mat_4x4_inv_with_det_as_denom(void)
     ibz_mat_4x4_zero(&mat);
     res = res || ibz_mat_4x4_inv_with_det_as_denom(&inv, &det, &mat);
     res = res || !ibz_is_zero(&det);
+    /* Both outputs are optional.  The status must still distinguish a
+     * singular matrix without dereferencing a NULL determinant pointer. */
+    res = res || ibz_mat_4x4_inv_with_det_as_denom(NULL, NULL, &mat);
     ibz_mat_4x4_identity(&mat);
+    res = res || !ibz_mat_4x4_inv_with_det_as_denom(NULL, NULL, &mat);
     if (ibz_mat_4x4_inv_with_det_as_denom(&inv, &det, &mat)) {
         res = res || !ibz_is_one(&det);
         res = res || !quat_test_dim4_validate_mat_4x4_rational_inv_if_exists(&inv, &det, &mat);

@@ -21,6 +21,13 @@ _fixed_degree_isogeny_impl(quat_left_ideal_t *lideal,
                            const int index_alternate_order)
 {
 
+    if (lideal == NULL || u == NULL || E34 == NULL ||
+        (numP != 0 && P12 == NULL) ||
+        index_alternate_order < 0 ||
+        index_alternate_order > NUM_ALTERNATE_EXTREMAL_ORDERS ||
+        ibz_cmp(u, &ibz_const_zero) <= 0 || ibz_is_even(u))
+        return ID2ISO_STATUS_FATAL;
+
     // var declaration
     int ret;
     ibz_t two_pow, tmp;
@@ -41,11 +48,15 @@ _fixed_degree_isogeny_impl(quat_left_ideal_t *lideal,
         // in that case, we just set it to be the biggest value possible
         length = TORSION_EVEN_POWER - HD_extra_torsion;
     } else {
-        length = ibz_bitsize(&QUATALG_PINFTY.p) + QUAT_repres_bound_input - u_bitsize;
-        assert(u_bitsize < (int)length);
-        assert(length < TORSION_EVEN_POWER - HD_extra_torsion);
+        int candidate_length = ibz_bitsize(&QUATALG_PINFTY.p) +
+                               QUAT_repres_bound_input - u_bitsize;
+        if (candidate_length <= 0 || u_bitsize >= candidate_length ||
+            candidate_length >= TORSION_EVEN_POWER - HD_extra_torsion)
+            return ID2ISO_STATUS_FATAL;
+        length = (unsigned)candidate_length;
     }
-    assert(length);
+    if (length == 0)
+        return ID2ISO_STATUS_FATAL;
 
     // var init
     ibz_init(&two_pow);
@@ -54,13 +65,18 @@ _fixed_degree_isogeny_impl(quat_left_ideal_t *lideal,
 
     ibz_pow(&two_pow, &ibz_const_two, length);
     ibz_copy(&tmp, u);
-    assert(ibz_cmp(&two_pow, &tmp) > 0);
-    assert(!ibz_is_even(&tmp));
+    if (ibz_cmp(&two_pow, &tmp) <= 0 || ibz_is_even(&tmp)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
     // computing the endomorphism theta of norm u * (2^(length) - u)
     ibz_sub(&tmp, &two_pow, &tmp);
     ibz_mul(&tmp, &tmp, u);
-    assert(!ibz_is_even(&tmp));
+    if (ibz_is_even(&tmp)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
     // setting-up the quat_represent_integer_params
     quat_represent_integer_params_t ri_params;
@@ -85,17 +101,7 @@ _fixed_degree_isogeny_impl(quat_left_ideal_t *lideal,
 
     ret = quat_represent_integer(&theta, &tmp, 1, &ri_params);
 
-    assert(!ibz_is_even(&tmp));
-
     if (!ret) {
-        printf("represent integer failed for the alternate order number %d and for "
-               "a target of "
-               "size %d for a u of size %d with length = "
-               "%u \n",
-               index_alternate_order,
-               ibz_bitsize(&tmp),
-               ibz_bitsize(u),
-               length);
         goto cleanup;
     }
     /* paper Issue 9: theta is the output of quat_represent_integer for target u,
@@ -105,6 +111,9 @@ _fixed_degree_isogeny_impl(quat_left_ideal_t *lideal,
         ret = ID2ISO_STATUS_FATAL;
         goto cleanup;
     }
+    /* The local order is an HNF copy of this static precomputation.  Repair
+     * the persistent parent pointer immediately, including later failures. */
+    lideal->parent_order = &EXTREMAL_ORDERS[index_alternate_order].order;
 
 #ifndef NDEBUG
     ibz_t test_norm, test_denom;
@@ -139,8 +148,10 @@ _fixed_degree_isogeny_impl(quat_left_ideal_t *lideal,
     ibz_mul(&two_pow, &two_pow, &ibz_const_two);
     ibz_mul(&two_pow, &two_pow, &ibz_const_two);
     ibz_copy(&tmp, u);
-    ibz_invmod(&tmp, &tmp, &two_pow);
-    assert(!ibz_is_even(&tmp));
+    if (!ibz_invmod(&tmp, &tmp, &two_pow) || ibz_is_even(&tmp)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
     ibz_mul(&theta.coord[0], &theta.coord[0], &tmp);
     ibz_mul(&theta.coord[1], &theta.coord[1], &tmp);
@@ -150,10 +161,21 @@ _fixed_degree_isogeny_impl(quat_left_ideal_t *lideal,
     // applying theta to the basis
     ec_basis_t B0_two_theta;
     copy_basis(&B0_two_theta, &B0_two);
-    endomorphism_application_even_basis(&B0_two_theta, index_alternate_order, &E0, &theta, length + HD_extra_torsion);
+    if (!endomorphism_application_even_basis(
+            &B0_two_theta,
+            index_alternate_order,
+            &E0,
+            &theta,
+            length + HD_extra_torsion)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
     // Ensure the basis we're using has the expected order
-    assert(test_basis_order_twof(&B0_two_theta, &E0, length + HD_extra_torsion));
+    if (!test_basis_order_twof(&B0_two_theta, &E0, length + HD_extra_torsion)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
     // Set-up the domain E0 x E0
     theta_couple_curve_t E00;
@@ -168,7 +190,6 @@ _fixed_degree_isogeny_impl(quat_left_ideal_t *lideal,
     if (!ret)
         goto cleanup;
 
-    assert(length);
     ret = (int)length;
 
 cleanup:
@@ -258,8 +279,8 @@ post_LLL_basis_treatment(ibz_mat_4x4_t *gram, ibz_mat_4x4_t *reduced, const ibz_
 
 // enumerate all vectors in an hypercube of norm m for the infinity norm
 // with respect to a basis whose gram matrix is given by gram
-// Returns an int `count`, the number of vectors found with the desired
-// properties
+// Returns the number of vectors found with the desired properties, or
+// ID2ISO_STATUS_FATAL if an exact fixed-precision division fails.
 static int
 enumerate_hypercube(ibz_vec_4_t *vecs, ibz_t *norms, int m, const ibz_mat_4x4_t *gram, const ibz_t *adjusted_norm)
 {
@@ -271,7 +292,12 @@ enumerate_hypercube(ibz_vec_4_t *vecs, ibz_t *norms, int m, const ibz_mat_4x4_t 
     ibz_init(&norm);
     ibz_vec_4_init(&point);
 
-    assert(m > 0);
+    if (m <= 0 || ibz_is_zero(adjusted_norm)) {
+        ibz_finalize(&remain);
+        ibz_finalize(&norm);
+        ibz_vec_4_finalize(&point);
+        return ID2ISO_STATUS_FATAL;
+    }
 
     int count = 0;
     int dim = 2 * m + 1;
@@ -341,7 +367,10 @@ enumerate_hypercube(ibz_vec_4_t *vecs, ibz_t *norms, int m, const ibz_mat_4x4_t 
                         // adjusted_norm
                         quat_qf_eval(&norm, gram, &point);
                         ibz_div(&norm, &remain, &norm, adjusted_norm);
-                        assert(ibz_is_zero(&remain));
+                        if (!ibz_is_zero(&remain)) {
+                            count = ID2ISO_STATUS_FATAL;
+                            goto cleanup;
+                        }
 
                         if (ibz_mod_ui(&norm, 2) == 1) {
                             ibz_set(&vecs[count][0], x);
@@ -357,11 +386,68 @@ enumerate_hypercube(ibz_vec_4_t *vecs, ibz_t *norms, int m, const ibz_mat_4x4_t 
         }
     }
 
+cleanup:
     ibz_finalize(&remain);
     ibz_finalize(&norm);
     ibz_vec_4_finalize(&point);
 
-    return count - 1;
+    return count;
+}
+
+/* Internal regression hook.  For m = 1 and diag(1,2,4,8), every point with
+ * x = -1 survives the filters and has odd norm, while every point with x = 0
+ * has even norm.  The exact count is therefore 3^3 = 27. */
+int
+dim2id2iso_enumerate_hypercube_regression_test(void)
+{
+    enum
+    {
+        test_m = 1,
+        test_capacity = 81,
+        expected_count = 27
+    };
+    ibz_vec_4_t *vecs = malloc(test_capacity * sizeof(*vecs));
+    ibz_t *norms = malloc(test_capacity * sizeof(*norms));
+    ibz_mat_4x4_t gram;
+    ibz_t adjusted_norm;
+    int initialized = 0;
+    int count = 0;
+    int ok = 0;
+
+    if (vecs == NULL || norms == NULL) {
+        free(norms);
+        free(vecs);
+        return 0;
+    }
+
+    ibz_mat_4x4_init(&gram);
+    ibz_init(&adjusted_norm);
+    ibz_set(&adjusted_norm, 1);
+    ibz_set(&gram[0][0], 1);
+    ibz_set(&gram[1][1], 2);
+    ibz_set(&gram[2][2], 4);
+    ibz_set(&gram[3][3], 8);
+
+    for (; initialized < test_capacity; initialized++) {
+        ibz_vec_4_init(&vecs[initialized]);
+        ibz_init(&norms[initialized]);
+    }
+
+    count = enumerate_hypercube(vecs, norms, test_m, &gram, &adjusted_norm);
+    ok = count == expected_count;
+    for (int i = 0; ok && i < count; i++) {
+        ok = ibz_cmp_int32(&vecs[i][0], -1) == 0 && ibz_mod_ui(&norms[i], 2) == 1;
+    }
+
+    for (int i = 0; i < initialized; i++) {
+        ibz_finalize(&norms[i]);
+        ibz_vec_4_finalize(&vecs[i]);
+    }
+    ibz_finalize(&adjusted_norm);
+    ibz_mat_4x4_finalize(&gram);
+    free(norms);
+    free(vecs);
+    return ok;
 }
 
 // enumerate through the two list given in input to find to integer d1,d2 such
@@ -397,6 +483,10 @@ find_uv_from_lists(ibz_t *au,
 
     // enumerating through the list
     for (int i1 = 0; i1 < index1; i1++) {
+        if (ibz_cmp(&small_norms1[i1], &ibz_const_zero) <= 0) {
+            found = ID2ISO_STATUS_FATAL;
+            goto cleanup;
+        }
         ibz_mod(&adjusted_norm, &n, &small_norms1[i1]);
         int starting_index2;
         if (is_diagonal) {
@@ -405,6 +495,10 @@ find_uv_from_lists(ibz_t *au,
             starting_index2 = 0;
         }
         for (int i2 = starting_index2; i2 < index2; i2++) {
+            if (ibz_cmp(&small_norms2[i2], &ibz_const_zero) <= 0) {
+                found = ID2ISO_STATUS_FATAL;
+                goto cleanup;
+            }
             // u = target / d1 mod d2
             if (!ibz_invmod(&remain, &small_norms2[i2], &small_norms1[i1])) {
                 continue;
@@ -422,11 +516,17 @@ find_uv_from_lists(ibz_t *au,
                     ibz_mul(&remain, v, &small_norms2[i2]);
                     ibz_copy(au, &n);
                     ibz_sub(u, au, &remain);
-                    assert(ibz_cmp(u, &ibz_const_zero) > 0);
+                    if (ibz_cmp(u, &ibz_const_zero) <= 0) {
+                        found = ID2ISO_STATUS_FATAL;
+                        goto cleanup;
+                    }
                     ibz_div(u, &remain, u, &small_norms1[i1]);
-                    assert(ibz_is_zero(&remain));
+                    if (!ibz_is_zero(&remain)) {
+                        found = ID2ISO_STATUS_FATAL;
+                        goto cleanup;
+                    }
                     // we want to remove weird cases where u,v have big power of two
-                    found = found && (ibz_get(u) != 0 && ibz_get(v) != 0);
+                    found = found && !ibz_is_zero(u) && !ibz_is_zero(v);
                     if (number_sum_square == 2) {
                         found = ibz_cornacchia_prime(au, bu, &ibz_const_one, u);
                     }
@@ -437,18 +537,19 @@ find_uv_from_lists(ibz_t *au,
                 }
             }
 
-            if (found) {
+            if (found > 0) {
                 // copying the indices
                 *index_sol1 = i1;
                 *index_sol2 = i2;
                 break;
             }
         }
-        if (found) {
+        if (found > 0) {
             break;
         }
     }
 
+cleanup:
     ibz_finalize(&n);
     ibz_finalize(&remain);
     ibz_finalize(&adjusted_norm);
@@ -492,6 +593,14 @@ find_uv(ibz_t *u,
 
 {
 
+    if (num_alternate_order < 0 ||
+        num_alternate_order > NUM_ALTERNATE_EXTREMAL_ORDERS ||
+        ibz_cmp(target, &ibz_const_zero) <= 0 ||
+        ibz_cmp(&lideal->norm, &ibz_const_zero) <= 0 ||
+        ibz_is_zero(&lideal->lattice.denom)) {
+        return ID2ISO_STATUS_FATAL;
+    }
+
     int result = ID2ISO_STATUS_FATAL;
 
     // variable declaration & init
@@ -522,9 +631,20 @@ find_uv(ibz_t *u,
         quat_left_ideal_init(&ideal[i]);
     }
 
+    quat_left_ideal_t reduced_id;
+    quat_left_ideal_init(&reduced_id);
+    quat_lattice_t right_order;
+    quat_lattice_init(&right_order);
+    quat_left_ideal_t conj_ideal;
+    quat_left_ideal_init(&conj_ideal);
+    quat_alg_elem_t delta;
+    quat_alg_elem_init(&delta);
+
     // first we reduce the ideal given in input
     quat_lideal_copy(&ideal[0], lideal);
-    quat_lideal_reduce_basis(&reduced[0], &gram[0], &ideal[0], Bpoo);
+    if (!quat_lideal_reduce_basis(&reduced[0], &gram[0], &ideal[0], Bpoo)) {
+        goto cleanup;
+    }
 
     ibz_mat_4x4_copy(&ideal[0].lattice.basis, &reduced[0]);
     ibz_set(&adjusted_norm[0], 1);
@@ -534,35 +654,37 @@ find_uv(ibz_t *u,
 
     // for efficient lattice reduction, we replace ideal[0] by the equivalent
     // ideal of smallest norm
-    quat_left_ideal_t reduced_id;
-    quat_left_ideal_init(&reduced_id);
     quat_lideal_copy(&reduced_id, &ideal[0]);
-    quat_alg_elem_t delta;
     // delta will be the element of smallest norm
-    quat_alg_elem_init(&delta);
     ibz_set(&delta.coord[0], 1);
     ibz_set(&delta.coord[1], 0);
     ibz_set(&delta.coord[2], 0);
     ibz_set(&delta.coord[3], 0);
     ibz_copy(&delta.denom, &reduced_id.lattice.denom);
     ibz_mat_4x4_eval(&delta.coord, &reduced[0], &delta.coord);
-    assert(quat_lattice_contains(NULL, &reduced_id.lattice, &delta));
+    if (!quat_lattice_contains(NULL, &reduced_id.lattice, &delta)) {
+        goto cleanup;
+    }
 
     // reduced_id = ideal[0] * \overline{delta}/n(ideal[0])
     quat_alg_conj(&delta, &delta);
     ibz_mul(&delta.denom, &delta.denom, &ideal[0].norm);
-    quat_lattice_alg_elem_mul(&reduced_id.lattice, &reduced_id.lattice, &delta, Bpoo);
+    if (!quat_lattice_alg_elem_mul(
+            &reduced_id.lattice, &reduced_id.lattice, &delta, Bpoo)) {
+        goto cleanup;
+    }
     ibz_copy(&reduced_id.norm, &gram[0][0][0]);
+    if (ibz_is_zero(&adjusted_norm[0])) {
+        goto cleanup;
+    }
     ibz_div(&reduced_id.norm, &remain, &reduced_id.norm, &adjusted_norm[0]);
-    assert(ibz_cmp(&remain, &ibz_const_zero) == 0);
+    if (!ibz_is_zero(&remain)) {
+        goto cleanup;
+    }
 
     // and conj_ideal is the conjugate of reduced_id
     // init the right order;
-    quat_lattice_t right_order;
-    quat_lattice_init(&right_order);
     // computing the conjugate
-    quat_left_ideal_t conj_ideal;
-    quat_left_ideal_init(&conj_ideal);
     if (!quat_lideal_conjugate_without_hnf(
             &conj_ideal, &right_order, &reduced_id, Bpoo)) {
         goto cleanup;
@@ -582,6 +704,9 @@ find_uv(ibz_t *u,
         ibz_set(&adjusted_norm[i], 1);
         ibz_mul(&adjusted_norm[i], &adjusted_norm[i], &ideal[i].lattice.denom);
         ibz_mul(&adjusted_norm[i], &adjusted_norm[i], &ideal[i].lattice.denom);
+        if (ibz_is_zero(&adjusted_norm[i])) {
+            goto cleanup;
+        }
         post_LLL_basis_treatment(&gram[i], &reduced[i], &ideal[i].norm, false);
     }
 
@@ -599,7 +724,7 @@ find_uv(ibz_t *u,
     size_t cube_count = (size_t)m4;
     size_t entry_count;
 
-    if (num_alternate_order < 0 || m4 <= 0 || order_count > SIZE_MAX / cube_count) {
+    if (m4 <= 0 || order_count > SIZE_MAX / cube_count) {
         goto cleanup;
     }
     entry_count = order_count * cube_count;
@@ -616,6 +741,9 @@ find_uv(ibz_t *u,
     int *indices = malloc(order_count * sizeof(*indices));
     struct vec_and_norm *small_vecs_and_norms =
         malloc(cube_count * sizeof(*small_vecs_and_norms));
+    int found = 0;
+    int i1;
+    int i2;
 
     if (small_vecs == NULL || small_norms == NULL || quotients == NULL ||
         indices == NULL || small_vecs_and_norms == NULL) {
@@ -627,19 +755,23 @@ find_uv(ibz_t *u,
         goto cleanup;
     }
 
+    for (size_t i = 0; i < entry_count; i++) {
+        ibz_init(&small_norms[i]);
+        ibz_vec_4_init(&small_vecs[i]);
+        ibz_init(&quotients[i]);
+    }
+
     for (int j = 0; j < num_alternate_order + 1; j++) {
         size_t row_offset = (size_t)j * cube_count;
         ibz_vec_4_t *row_vecs = small_vecs + row_offset;
         ibz_t *row_norms = small_norms + row_offset;
         ibz_t *row_quotients = quotients + row_offset;
 
-        for (int i = 0; i < m4; i++) {
-            ibz_init(&row_norms[i]);
-            ibz_vec_4_init(&row_vecs[i]);
-            ibz_init(&row_quotients[i]);
-        }
         // enumeration in the hypercube of norm m
         indices[j] = enumerate_hypercube(row_vecs, row_norms, m, &gram[j], &adjusted_norm[j]);
+        if (indices[j] < 0 || indices[j] > m4) {
+            goto cleanup_workspace_fatal;
+        }
 
         // sorting the list
         {
@@ -664,29 +796,30 @@ find_uv(ibz_t *u,
         }
     }
 
-    int found = 0;
-    int i1;
-    int i2;
     for (int j1 = 0; j1 < num_alternate_order + 1; j1++) {
         for (int j2 = j1; j2 < num_alternate_order + 1; j2++) {
             // in this case, there are some small adjustements to make
             int is_diago = (j1 == j2);
-            found = find_uv_from_lists(&au,
-                                       &bu,
-                                       &av,
-                                       &bv,
-                                       u,
-                                       v,
-                                       &i1,
-                                       &i2,
-                                       target,
-                                       small_norms + (size_t)j1 * cube_count,
-                                       small_norms + (size_t)j2 * cube_count,
-                                       quotients + (size_t)j2 * cube_count,
-                                       indices[j1],
-                                       indices[j2],
-                                       is_diago,
-                                       0);
+            int list_status = find_uv_from_lists(&au,
+                                                 &bu,
+                                                 &av,
+                                                 &bv,
+                                                 u,
+                                                 v,
+                                                 &i1,
+                                                 &i2,
+                                                 target,
+                                                 small_norms + (size_t)j1 * cube_count,
+                                                 small_norms + (size_t)j2 * cube_count,
+                                                 quotients + (size_t)j2 * cube_count,
+                                                 indices[j1],
+                                                 indices[j2],
+                                                 is_diago,
+                                                 0);
+            if (list_status < 0) {
+                goto cleanup_workspace_fatal;
+            }
+            found = list_status;
             // }
 
             if (found) {
@@ -699,11 +832,18 @@ find_uv(ibz_t *u,
                     &beta1->coord, &reduced[j1], &small_vecs[(size_t)j1 * cube_count + (size_t)i1]);
                 ibz_mat_4x4_eval(
                     &beta2->coord, &reduced[j2], &small_vecs[(size_t)j2 * cube_count + (size_t)i2]);
-                assert(quat_lattice_contains(NULL, &ideal[j1].lattice, beta1));
-                assert(quat_lattice_contains(NULL, &ideal[j2].lattice, beta2));
+                if (!quat_lattice_contains(NULL, &ideal[j1].lattice, beta1) ||
+                    !quat_lattice_contains(NULL, &ideal[j2].lattice, beta2)) {
+                    goto cleanup_workspace_fatal;
+                }
                 if (j1 != 0 || j2 != 0) {
+                    if (ibz_is_zero(&lideal->norm)) {
+                        goto cleanup_workspace_fatal;
+                    }
                     ibz_div(&delta.denom, &remain, &delta.denom, &lideal->norm);
-                    assert(ibz_cmp(&remain, &ibz_const_zero) == 0);
+                    if (!ibz_is_zero(&remain)) {
+                        goto cleanup_workspace_fatal;
+                    }
                     ibz_mul(&delta.denom, &delta.denom, &conj_ideal.norm);
                 }
                 if (j1 != 0) {
@@ -758,13 +898,13 @@ find_uv(ibz_t *u,
         }
     }
 
-    for (int j = 0; j < num_alternate_order + 1; j++) {
-        size_t row_offset = (size_t)j * cube_count;
-        for (int i = 0; i < m4; i++) {
-            ibz_finalize(&small_norms[row_offset + (size_t)i]);
-            ibz_vec_4_finalize(&small_vecs[row_offset + (size_t)i]);
-            ibz_finalize(&quotients[row_offset + (size_t)i]);
-        }
+    result = found;
+
+cleanup_workspace:
+    for (size_t i = 0; i < entry_count; i++) {
+        ibz_finalize(&small_norms[i]);
+        ibz_vec_4_finalize(&small_vecs[i]);
+        ibz_finalize(&quotients[i]);
     }
 
     sqisign_secure_free(small_vecs_and_norms, cube_count * sizeof(*small_vecs_and_norms));
@@ -773,7 +913,11 @@ find_uv(ibz_t *u,
     sqisign_secure_free(small_norms, entry_count * sizeof(*small_norms));
     sqisign_secure_free(small_vecs, entry_count * sizeof(*small_vecs));
 
-    result = found;
+    goto cleanup;
+
+cleanup_workspace_fatal:
+    result = ID2ISO_STATUS_FATAL;
+    goto cleanup_workspace;
 
     // var finalize
 cleanup:
@@ -856,17 +1000,33 @@ dim2id2iso_ideal_to_isogeny_clapotis(quat_alg_elem_t *beta1,
         goto cleanup;
     }
 
-    assert(ibz_is_odd(d1) && ibz_is_odd(d2));
+    if (!ibz_is_odd(d1) || !ibz_is_odd(d2)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
     // compute the valuation of the GCD of u,v
     ibz_gcd(&tmp, u, v);
-    assert(ibz_cmp(&tmp, &ibz_const_zero) != 0);
+    if (ibz_is_zero(&tmp)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
     int exp_gcd = ibz_two_adic(&tmp);
+    if (exp_gcd < 0 || exp_gcd > TORSION_EVEN_POWER) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
     exp = TORSION_EVEN_POWER - exp_gcd;
     // removing the power of 2 from u and v
     ibz_div(u, &test1, u, &tmp);
-    assert(ibz_cmp(&test1, &ibz_const_zero) == 0);
+    if (!ibz_is_zero(&test1)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
     ibz_div(v, &test1, v, &tmp);
-    assert(ibz_cmp(&test1, &ibz_const_zero) == 0);
+    if (!ibz_is_zero(&test1)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
 #ifndef NDEBUG
     // checking that ud1+vd2 = 2^exp
@@ -1032,7 +1192,10 @@ dim2id2iso_ideal_to_isogeny_clapotis(quat_alg_elem_t *beta1,
     if (index_order2 > 0) {
         ibz_mul(&tmp, &tmp, &ALTERNATE_CONNECTING_IDEALS[index_order2 - 1].norm);
     }
-    ibz_invmod(&tmp, &tmp, &two_pow);
+    if (!ibz_invmod(&tmp, &tmp, &two_pow)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
     ibz_mul(&theta.coord[0], &theta.coord[0], &tmp);
     ibz_mul(&theta.coord[1], &theta.coord[1], &tmp);
@@ -1040,9 +1203,16 @@ dim2id2iso_ideal_to_isogeny_clapotis(quat_alg_elem_t *beta1,
     ibz_mul(&theta.coord[3], &theta.coord[3], &tmp);
 
     // applying theta
-    endomorphism_application_even_basis(&bas2, 0, &Fv_codomain.E1, &theta, TORSION_EVEN_POWER);
+    if (!endomorphism_application_even_basis(
+            &bas2, 0, &Fv_codomain.E1, &theta, TORSION_EVEN_POWER)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
-    assert(test_basis_order_twof(&bas2, &Fv_codomain.E1, TORSION_EVEN_POWER));
+    if (!test_basis_order_twof(&bas2, &Fv_codomain.E1, TORSION_EVEN_POWER)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
     // copying points to the second part of the kernel
     copy_point(&ker.T1.P2, &bas2.P);
@@ -1132,13 +1302,20 @@ dim2id2iso_ideal_to_isogeny_clapotis(quat_alg_elem_t *beta1,
     if (index_order1 != 0) {
         ibz_mul(&tmp, &tmp, &CONNECTING_IDEALS[index_order1].norm);
     }
-    ibz_invmod(&tmp, &tmp, &TORSION_PLUS_2POWER);
+    if (!ibz_invmod(&tmp, &tmp, &TORSION_PLUS_2POWER)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
     ibz_mul(&beta1->coord[0], &beta1->coord[0], &tmp);
     ibz_mul(&beta1->coord[1], &beta1->coord[1], &tmp);
     ibz_mul(&beta1->coord[2], &beta1->coord[2], &tmp);
     ibz_mul(&beta1->coord[3], &beta1->coord[3], &tmp);
 
-    endomorphism_application_even_basis(basis, 0, codomain, beta1, TORSION_EVEN_POWER);
+    if (!endomorphism_application_even_basis(
+            basis, 0, codomain, beta1, TORSION_EVEN_POWER)) {
+        ret = ID2ISO_STATUS_FATAL;
+        goto cleanup;
+    }
 
 #ifndef NDEBUG
     {

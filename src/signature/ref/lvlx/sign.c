@@ -4,6 +4,7 @@
 #include <id2iso.h>
 #include <torsion_constants.h>
 #include <encoded_sizes.h>
+#include <string.h>
 
 typedef enum {
     SIGNATURE_STEP_ML2_EXHAUSTED = -1,
@@ -18,18 +19,15 @@ commit(ec_curve_t *E_com, ec_basis_t *basis_even_com, quat_left_ideal_t *lideal_
 {
     bool found = false;
 
-    fprintf(stderr, "[COMMIT] enter, calling sampling_random_ideal\n"); fflush(stderr);
     quat_random_ideal_status_t sampling_status =
         quat_sampling_random_ideal_O0_given_norm(
             lideal_com, &COM_DEGREE, 1, &QUAT_represent_integer_params, NULL);
     if (sampling_status == QUAT_RANDOM_IDEAL_FATAL)
         return SIGNATURE_STEP_ML2_EXHAUSTED;
     found = (sampling_status == QUAT_RANDOM_IDEAL_SUCCESS);
-    fprintf(stderr, "[COMMIT] sampling done found=%d\n", found); fflush(stderr);
     // replacing it with a shorter prime norm equivalent ideal
     found = found && quat_lideal_prime_norm_reduced_equivalent(
                          lideal_com, &QUATALG_PINFTY, QUAT_primality_num_iter, QUAT_equiv_bound_coeff);
-    fprintf(stderr, "[COMMIT] prime_norm_reduced_equivalent done found=%d\n", found); fflush(stderr);
     // ideal to isogeny clapotis
     if (found) {
         int isogeny_status =
@@ -38,7 +36,6 @@ commit(ec_curve_t *E_com, ec_basis_t *basis_even_com, quat_left_ideal_t *lideal_
             return SIGNATURE_STEP_ML2_EXHAUSTED;
         found = (isogeny_status > 0);
     }
-    fprintf(stderr, "[COMMIT] dim2id2iso done found=%d\n", found); fflush(stderr);
     return found ? SIGNATURE_STEP_OK : SIGNATURE_STEP_RETRY;
 }
 
@@ -67,13 +64,16 @@ compute_challenge_ideal_signature(quat_left_ideal_t *lideal_chall_two, const sig
         ibz_vec_2_finalize(&vec);
         return 0;
     }
-    assert(ibz_cmp(&lideal_chall_two->norm, &TORSION_PLUS_2POWER) == 0);
+    if (ibz_cmp(&lideal_chall_two->norm, &TORSION_PLUS_2POWER) != 0) {
+        ibz_vec_2_finalize(&vec);
+        return 0;
+    }
 
     ibz_vec_2_finalize(&vec);
     return 1;
 }
 
-static void
+static int
 sample_response(quat_alg_elem_t *x, const quat_lattice_t *lattice, const ibz_t *lattice_content)
 {
     ibz_t bound;
@@ -82,10 +82,10 @@ sample_response(quat_alg_elem_t *x, const quat_lattice_t *lattice, const ibz_t *
     ibz_sub(&bound, &bound, &ibz_const_one);
     ibz_mul(&bound, &bound, lattice_content);
 
-    int ok UNUSED = quat_lattice_sample_from_ball(x, lattice, &QUATALG_PINFTY, &bound);
-    assert(ok);
+    int ok = quat_lattice_sample_from_ball(x, lattice, &QUATALG_PINFTY, &bound);
 
     ibz_finalize(&bound);
+    return ok;
 }
 
 static signature_step_status_t
@@ -105,29 +105,23 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
     quat_lattice_init(&lattice_hom_chall_to_com);
 
     // lideal_chall_secret = lideal_secret * lideal_chall_two
-    fprintf(stderr, "[RESP] enter, calling lideal_inter\n"); fflush(stderr);
     if (!quat_lideal_inter(&lideal_chall_secret, lideal_chall_two, &(sk->secret_ideal), &QUATALG_PINFTY)) {
         goto cleanup;
     }
-    fprintf(stderr, "[RESP] lideal_inter done, basis[0][0].bits=%d denom.bits=%d\n",
-            ibz_bitsize(&lideal_chall_secret.lattice.basis[0][0]),
-            ibz_bitsize(&lideal_chall_secret.lattice.denom)); fflush(stderr);
 
     // now we compute lideal_com_to_chall which is dual(Icom)* lideal_chall_secret
     quat_lattice_conjugate_without_hnf(&lat_commit, &(lideal_commit->lattice));
-    fprintf(stderr, "[RESP] conj done, calling intersect_mlll\n"); fflush(stderr);
     if (!quat_lattice_intersect_mlll(
             &lattice_hom_chall_to_com, &lideal_chall_secret.lattice, &lat_commit, &QUATALG_PINFTY)) {
         goto cleanup;
     }
-    fprintf(stderr, "[RESP] intersect_mlll done basis[0][0].bits=%d\n",
-            ibz_bitsize(&lattice_hom_chall_to_com.basis[0][0])); fflush(stderr);
 
     // sampling the smallest response
     ibz_mul(lattice_content, &lideal_chall_secret.norm, &lideal_commit->norm);
-    fprintf(stderr, "[RESP] calling sample_response radius.bits=%d\n", ibz_bitsize(lattice_content)); fflush(stderr);
-    sample_response(resp_quat, &lattice_hom_chall_to_com, lattice_content);
-    fprintf(stderr, "[RESP] sample_response done\n"); fflush(stderr);
+    if (!sample_response(resp_quat, &lattice_hom_chall_to_com, lattice_content)) {
+        status = SIGNATURE_STEP_RETRY;
+        goto cleanup;
+    }
     status = SIGNATURE_STEP_OK;
 
     // Clean up
@@ -141,46 +135,57 @@ cleanup:
 static int
 compute_backtracking_signature(signature_t *sig, quat_alg_elem_t *resp_quat, ibz_t *lattice_content, ibz_t *remain)
 {
-    uint_fast8_t backtracking;
-    ibz_t tmp;
+    int ok = 0;
+    uint_fast8_t backtracking = 0;
+    ibz_t tmp, quotient, division_remainder;
+    quat_alg_elem_t candidate_resp;
     ibz_init(&tmp);
+    ibz_init(&quotient);
+    ibz_init(&division_remainder);
+    quat_alg_elem_init(&candidate_resp);
 
     ibz_vec_4_t dummy_coord;
     ibz_vec_4_init(&dummy_coord);
 
-    fprintf(stderr, "[BACKTRACK] enter resp_quat.coord_max=%d resp_quat.denom=%d lattice_content=%d\n",
-        ({ int m=0; for (int _i=0;_i<4;_i++){int b=ibz_bitsize(&resp_quat->coord[_i]); if(b>m)m=b;} m; }),
-        ibz_bitsize(&resp_quat->denom), ibz_bitsize(lattice_content));
-    fflush(stderr);
+    if (!quat_alg_make_primitive(&dummy_coord, &tmp, resp_quat, &MAXORD_O0)) {
+        goto cleanup;
+    }
 
-    quat_alg_make_primitive(&dummy_coord, &tmp, resp_quat, &MAXORD_O0);
-    fprintf(stderr, "[BACKTRACK] post_make_primitive tmp=%d resp_quat.coord_max=%d\n",
-        ibz_bitsize(&tmp),
-        ({ int m=0; for (int _i=0;_i<4;_i++){int b=ibz_bitsize(&resp_quat->coord[_i]); if(b>m)m=b;} m; }));
-    fflush(stderr);
-
-    ibz_mul(&resp_quat->denom, &resp_quat->denom, &tmp);
-    // Under NDEBUG the assert(ok) inside quat_alg_make_primitive is compiled out,
-    // so a quat_lattice_contains failure silently propagates garbage downstream
-    // and protocols_sign's retry loop spins on impossible invariants. Detect the
-    // failure here and bubble it up so the outer loop can retry from commit.
-    if (!quat_lattice_contains(NULL, &MAXORD_O0, resp_quat)) {
-        ibz_finalize(&tmp);
-        ibz_vec_4_finalize(&dummy_coord);
-        return 0;
+    quat_alg_elem_copy(&candidate_resp, resp_quat);
+    ibz_mul(&candidate_resp.denom, &candidate_resp.denom, &tmp);
+    // Keep the postcondition explicit in Release builds too.
+    if (!quat_lattice_contains(NULL, &MAXORD_O0, &candidate_resp)) {
+        goto cleanup;
     }
 
     // the backtracking is the common part of the response and the challenge
     // its degree is the scalar tmp computed above such that quat_resp is in tmp * O0.
-    backtracking = ibz_two_adic(&tmp);
-    sig->backtracking = backtracking;
+    int valuation = ibz_two_adic(&tmp);
+    if (valuation < 0 || valuation > SQIsign_response_length) {
+        goto cleanup;
+    }
+    backtracking = (uint_fast8_t)valuation;
 
     ibz_pow(&tmp, &ibz_const_two, backtracking);
-    ibz_div(lattice_content, remain, lattice_content, &tmp);
+    ibz_div(&quotient, &division_remainder, lattice_content, &tmp);
+    if (!ibz_is_zero(&division_remainder)) {
+        goto cleanup;
+    }
 
+    /* Publish only after every invariant has been checked. */
+    quat_alg_elem_copy(resp_quat, &candidate_resp);
+    ibz_copy(lattice_content, &quotient);
+    ibz_set(remain, 0);
+    sig->backtracking = backtracking;
+    ok = 1;
+
+cleanup:
+    quat_alg_elem_finalize(&candidate_resp);
+    ibz_finalize(&division_remainder);
+    ibz_finalize(&quotient);
     ibz_finalize(&tmp);
     ibz_vec_4_finalize(&dummy_coord);
-    return 1;
+    return ok;
 }
 
 static signature_step_status_t
@@ -206,15 +211,8 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
     ibz_init(&norm_d);
     ibz_init(&tmp);
 
-    fprintf(stderr, "[AUX-NORM] enter resp_quat.coord_max=%d resp_quat.denom=%d lattice_content=%d\n",
-        ({ int m=0; for (int _i=0;_i<4;_i++){int b=ibz_bitsize(&resp_quat->coord[_i]); if(b>m)m=b;} m; }),
-        ibz_bitsize(&resp_quat->denom), ibz_bitsize(lattice_content));
-    fflush(stderr);
-
-    quat_alg_norm(&degree_full_resp, &norm_d, resp_quat, &QUATALG_PINFTY);
-
-    fprintf(stderr, "[AUX-NORM] post_norm degree_full_resp=%d\n", ibz_bitsize(&degree_full_resp));
-    fflush(stderr);
+    if (!quat_alg_norm(&degree_full_resp, &norm_d, resp_quat, &QUATALG_PINFTY))
+        goto done;
 
     // Under NDEBUG the asserts below are compiled out, so a non-unit norm_d or
     // a non-zero remain quietly propagates garbage and starves the outer retry
@@ -225,12 +223,25 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
 
     // dividing by n(lideal_com) * n(lideal_secret_chall)
     ibz_div(&degree_full_resp, remain, &degree_full_resp, lattice_content);
-    if (ibz_cmp(remain, &ibz_const_zero) != 0) {
+    if (ibz_cmp(remain, &ibz_const_zero) != 0 ||
+        ibz_cmp(&degree_full_resp, &ibz_const_zero) <= 0 ||
+        sig->backtracking > SQIsign_response_length) {
+        goto done;
+    }
+
+    // The complete response degree must fit below the configured response
+    // bound. This also prevents the exponent arithmetic below from wrapping.
+    ibz_pow(&tmp, &ibz_const_two, SQIsign_response_length - sig->backtracking);
+    if (ibz_cmp(&degree_full_resp, &tmp) >= 0) {
         goto done;
     }
 
     // computing the diadic valuation
-    exp_diadic_val_full_resp = ibz_two_adic(&degree_full_resp);
+    int valuation = ibz_two_adic(&degree_full_resp);
+    if (valuation < 0 || valuation > SQIsign_response_length - sig->backtracking) {
+        goto done;
+    }
+    exp_diadic_val_full_resp = (uint_fast8_t)valuation;
     sig->two_resp_length = exp_diadic_val_full_resp;
 
     // removing the power of two part
@@ -239,11 +250,6 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
     if (ibz_cmp(remain, &ibz_const_zero) != 0) {
         goto done;
     }
-#ifndef NDEBUG
-    ibz_pow(&tmp, &ibz_const_two, SQIsign_response_length - sig->backtracking);
-    assert(ibz_cmp(&tmp, &degree_odd_resp) > 0);
-#endif
-
     // creating the ideal
     quat_alg_conj(resp_quat, resp_quat);
 
@@ -267,7 +273,9 @@ compute_random_aux_norm_and_helpers(uint_fast8_t *out_pow_dim2_deg_resp,
     for (int i = 0; i < HD_extra_torsion; i++)
         ibz_mul(remain, remain, &ibz_const_two);
 
-    ibz_invmod(degree_resp_inv, &degree_odd_resp, remain);
+    if (!ibz_invmod(degree_resp_inv, &degree_odd_resp, remain)) {
+        goto done;
+    }
 
     *out_pow_dim2_deg_resp = pow_dim2_deg_resp;
     status = SIGNATURE_STEP_OK;
@@ -294,12 +302,6 @@ evaluate_random_aux_isogeny_signature(ec_curve_t *E_aux,
     quat_left_ideal_init(&lideal_aux);
     quat_left_ideal_init(&lideal_aux_resp_com);
 
-    fprintf(stderr, "[EVAL-AUX] enter norm=%d lideal_com_resp.basis_max=%d nrd=%d denom=%d\n",
-        ibz_bitsize(norm),
-        ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_com_resp->lattice.basis[_i][_j]); if(b>m)m=b;} m; }),
-        ibz_bitsize(&lideal_com_resp->norm), ibz_bitsize(&lideal_com_resp->lattice.denom));
-    fflush(stderr);
-
     // sampling the ideal at random
     quat_random_ideal_status_t sampling_status =
         quat_sampling_random_ideal_O0_given_norm(
@@ -310,11 +312,6 @@ evaluate_random_aux_isogeny_signature(ec_curve_t *E_aux,
     }
     int found = (sampling_status == QUAT_RANDOM_IDEAL_SUCCESS);
 
-    fprintf(stderr, "[EVAL-AUX] post_sampling found=%d lideal_aux.basis_max=%d\n",
-        found,
-        found ? ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_aux.lattice.basis[_i][_j]); if(b>m)m=b;} m; }) : 0);
-    fflush(stderr);
-
     if (!found)
         goto cleanup;
 
@@ -323,11 +320,6 @@ evaluate_random_aux_isogeny_signature(ec_curve_t *E_aux,
         status = SIGNATURE_STEP_ML2_EXHAUSTED;
         goto cleanup;
     }
-
-    fprintf(stderr, "[EVAL-AUX] post_inter basis_max=%d denom=%d\n",
-        ({ int m=0; for (int _i=0;_i<4;_i++)for (int _j=0;_j<4;_j++){int b=ibz_bitsize(&lideal_aux_resp_com.lattice.basis[_i][_j]); if(b>m)m=b;} m; }),
-        ibz_bitsize(&lideal_aux_resp_com.lattice.denom));
-    fflush(stderr);
 
     // now we evaluate this isogeny on the basis of E0
     int isogeny_status =
@@ -338,8 +330,6 @@ evaluate_random_aux_isogeny_signature(ec_curve_t *E_aux,
     }
     found = (isogeny_status > 0);
 
-    fprintf(stderr, "[EVAL-AUX] post_dim2id2iso found=%d\n", found);
-    fflush(stderr);
     status = found ? SIGNATURE_STEP_OK : SIGNATURE_STEP_RETRY;
 
     // Clean up
@@ -358,10 +348,6 @@ compute_dim2_isogeny_challenge(theta_couple_curve_with_basis_t *codomain,
                                int exp_diadic_val_full_resp,
                                int reduced_order)
 {
-    fprintf(stderr, "[DIM2-CHL] enter degree_resp_inv=%d pow_dim2_deg_resp=%d exp_diadic=%d reduced_order=%d\n",
-        ibz_bitsize(degree_resp_inv), pow_dim2_deg_resp, exp_diadic_val_full_resp, reduced_order);
-    fflush(stderr);
-
     // now, we compute the isogeny Phi : Ecom x Eaux -> Echl' x Eaux'
     // where Echl' is 2^exp_diadic_val_full_resp isogenous to Echal
     // ker Phi = <(Bcom_can.P,Baux.P),(Bcom_can.Q,Baux.Q)>
@@ -377,7 +363,9 @@ compute_dim2_isogeny_challenge(theta_couple_curve_with_basis_t *codomain,
 
     // dividing by the degree of the response
     digit_t scalar[NWORDS_ORDER];
-    ibz_to_digit_array(scalar, degree_resp_inv);
+    if (!ibz_to_digits_checked(scalar, NWORDS_ORDER, degree_resp_inv)) {
+        return 0;
+    }
     ec_mul(&dim_two_ker.T1.P2, scalar, reduced_order, &dim_two_ker.T1.P2, &EcomXEaux.E2);
     ec_mul(&dim_two_ker.T2.P2, scalar, reduced_order, &dim_two_ker.T2.P2, &EcomXEaux.E2);
     ec_mul(&dim_two_ker.T1m2.P2, scalar, reduced_order, &dim_two_ker.T1m2.P2, &EcomXEaux.E2);
@@ -463,7 +451,10 @@ compute_small_chain_isogeny_signature(ec_curve_t *E_chall_2,
     }
 
     // computing the coefficients of the kernel in terms of the basis of O0
-    id2iso_ideal_to_kernel_dlogs_even(&vec_resp_two, &lideal_resp_two);
+    if (!id2iso_ideal_to_kernel_dlogs_even(&vec_resp_two, &lideal_resp_two)) {
+        ret = 0;
+        goto cleanup;
+    }
 
     ec_point_t points[3];
     copy_point(&points[0], &B_chall_2->P);
@@ -476,7 +467,10 @@ compute_small_chain_isogeny_signature(ec_curve_t *E_chall_2,
 
     ec_point_t ker;
     // applying the vector to find the kernel
-    ec_biscalar_mul_ibz_vec(&ker, &vec_resp_two, length, B_chall_2, E_chall_2);
+    if (!ec_biscalar_mul_ibz_vec(&ker, &vec_resp_two, length, B_chall_2, E_chall_2)) {
+        ret = 0;
+        goto cleanup;
+    }
     assert(test_point_order_twof(&ker, E_chall_2, length));
 
     // computing the isogeny and pushing the points
@@ -513,9 +507,9 @@ compute_challenge_codomain_signature(const signature_t *sig,
     assert(test_basis_order_twof(&bas_sk, &sk->curve, TORSION_EVEN_POWER));
 
     // Compute the kernel
-    {
-        ec_ladder3pt(&phi_chall.kernel, sig->chall_coeff, &bas_sk.P, &bas_sk.Q, &bas_sk.PmQ, &sk->curve);
-    }
+    if (!ec_ladder3pt(
+            &phi_chall.kernel, sig->chall_coeff, &bas_sk.P, &bas_sk.Q, &bas_sk.PmQ, &sk->curve))
+        return 0;
     assert(test_point_order_twof(&phi_chall.kernel, &sk->curve, TORSION_EVEN_POWER));
 
     // Double kernel to get correct order
@@ -553,7 +547,7 @@ set_aux_curve_signature(signature_t *sig, ec_curve_t *E_aux)
     fp2_copy(&sig->E_aux_A, &E_aux->A);
 }
 
-static void
+static int
 compute_and_set_basis_change_matrix(signature_t *sig,
                                     const ec_basis_t *B_aux_2,
                                     ec_basis_t *B_chall_2,
@@ -561,8 +555,7 @@ compute_and_set_basis_change_matrix(signature_t *sig,
                                     ec_curve_t *E_chall,
                                     int f)
 {
-    fprintf(stderr, "[BASIS-CHG] enter f=%d\n", f);
-    fflush(stderr);
+    int ret = 0;
 
     // Matrices for change of bases matrices
     ibz_mat_2x2_t mat_Baux2_to_Baux2_can, mat_Bchall_can_to_Bchall;
@@ -571,8 +564,12 @@ compute_and_set_basis_change_matrix(signature_t *sig,
 
     // Compute canonical bases
     ec_basis_t B_can_chall, B_aux_2_can;
-    sig->hint_chall = ec_curve_to_basis_2f_to_hint(&B_can_chall, E_chall, TORSION_EVEN_POWER);
-    sig->hint_aux = ec_curve_to_basis_2f_to_hint(&B_aux_2_can, E_aux_2, TORSION_EVEN_POWER);
+    if (!ec_curve_to_basis_2f_to_hint(
+            &B_can_chall, E_chall, TORSION_EVEN_POWER, &sig->hint_chall) ||
+        !ec_curve_to_basis_2f_to_hint(
+            &B_aux_2_can, E_aux_2, TORSION_EVEN_POWER, &sig->hint_aux)) {
+        goto cleanup;
+    }
 
 #ifndef NDEBUG
     {
@@ -588,7 +585,8 @@ compute_and_set_basis_change_matrix(signature_t *sig,
     change_of_basis_matrix_tate_invert(&mat_Baux2_to_Baux2_can, &B_aux_2_can, B_aux_2, E_aux_2, f);
 
     // apply the change of basis to B_chall_2
-    matrix_application_even_basis(B_chall_2, E_chall, &mat_Baux2_to_Baux2_can, f);
+    if (!matrix_application_even_basis(B_chall_2, E_chall, &mat_Baux2_to_Baux2_can, f))
+        goto cleanup;
 
 #ifndef NDEBUG
     {
@@ -600,21 +598,35 @@ compute_and_set_basis_change_matrix(signature_t *sig,
     // compute the matrix to go from B_chall_can to B_chall_2
     change_of_basis_matrix_tate(&mat_Bchall_can_to_Bchall, B_chall_2, &B_can_chall, E_chall, f);
 
-    // Assert all values in the matrix are of the expected size for packing
-    assert(ibz_bitsize(&mat_Bchall_can_to_Bchall[0][0]) <= SQIsign_response_length + HD_extra_torsion);
-    assert(ibz_bitsize(&mat_Bchall_can_to_Bchall[0][1]) <= SQIsign_response_length + HD_extra_torsion);
-    assert(ibz_bitsize(&mat_Bchall_can_to_Bchall[1][0]) <= SQIsign_response_length + HD_extra_torsion);
-    assert(ibz_bitsize(&mat_Bchall_can_to_Bchall[1][1]) <= SQIsign_response_length + HD_extra_torsion);
+    // All values must be non-negative and fit the serialized scalar capacity.
+    for (int row = 0; row < 2; ++row) {
+        for (int col = 0; col < 2; ++col) {
+            const ibz_t *entry = &mat_Bchall_can_to_Bchall[row][col];
+            if (ibz_is_negative(entry) ||
+                ibz_bitsize(entry) > SQIsign_response_length + HD_extra_torsion) {
+                goto cleanup;
+            }
+        }
+    }
 
     // Set the basis change matrix to signature
-    ibz_to_digit_array(sig->mat_Bchall_can_to_B_chall[0][0], &(mat_Bchall_can_to_Bchall[0][0]));
-    ibz_to_digit_array(sig->mat_Bchall_can_to_B_chall[0][1], &(mat_Bchall_can_to_Bchall[0][1]));
-    ibz_to_digit_array(sig->mat_Bchall_can_to_B_chall[1][0], &(mat_Bchall_can_to_Bchall[1][0]));
-    ibz_to_digit_array(sig->mat_Bchall_can_to_B_chall[1][1], &(mat_Bchall_can_to_Bchall[1][1]));
+    for (int row = 0; row < 2; ++row) {
+        for (int col = 0; col < 2; ++col) {
+            if (!ibz_to_digits_checked(sig->mat_Bchall_can_to_B_chall[row][col],
+                                       NWORDS_ORDER,
+                                       &mat_Bchall_can_to_Bchall[row][col])) {
+                memset(sig->mat_Bchall_can_to_B_chall, 0, sizeof(sig->mat_Bchall_can_to_B_chall));
+                goto cleanup;
+            }
+        }
+    }
+    ret = 1;
 
     // Finalise the matrices
+cleanup:
     ibz_mat_2x2_finalize(&mat_Bchall_can_to_Bchall);
     ibz_mat_2x2_finalize(&mat_Baux2_to_Baux2_can);
+    return ret;
 }
 
 int
@@ -622,7 +634,6 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
 {
     int ret = 0;
     int reduced_order = 0; // work around false positive gcc warning
-    int sign_retries = 0;
 
     uint_fast8_t pow_dim2_deg_resp;
     assert(SQIsign_response_length <= (intmax_t)UINT_FAST8_MAX); // otherwise we might need more bits there
@@ -667,7 +678,6 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
 
         // start again if the commitment generation has failed
         if (!ret) {
-            sign_retries++;
             continue;
         }
 
@@ -692,9 +702,13 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
             // Clean up
             quat_left_ideal_finalize(&lideal_chall_two);
 
-            if (response_status != SIGNATURE_STEP_OK) {
+            if (response_status == SIGNATURE_STEP_ML2_EXHAUSTED) {
                 ret = 0;
                 goto cleanup;
+            }
+            if (response_status != SIGNATURE_STEP_OK) {
+                ret = 0;
+                continue;
             }
         }
 
@@ -704,7 +718,6 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
             // make_primitive's lattice-containment invariant was violated (silently
             // under NDEBUG). Retry from commit instead of spinning forever.
             ret = 0;
-            sign_retries++;
             continue;
         }
         (void)0;
@@ -729,7 +742,6 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
         if (helper_status != SIGNATURE_STEP_OK) {
             // Norm/divisibility invariants violated under NDEBUG; retry from commit.
             ret = 0;
-            sign_retries++;
             continue;
         }
         (void)0;
@@ -753,7 +765,6 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
 
             // auxiliary isogeny computation failed we must start again
             if (!ret) {
-                sign_retries++;
                 continue;
             }
 
@@ -780,7 +791,6 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
                 &Eaux2_Echall2, &Ecom_Eaux, &degree_resp_inv, pow_dim2_deg_resp, sig->two_resp_length, reduced_order);
             (void)0;
             if (!ret) {
-                sign_retries++;
                 continue;
             }
         } else {
@@ -789,7 +799,6 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
             copy_curve(&Eaux2_Echall2.E2, &Ecom_Eaux.E1);
 
             reduced_order = sig->two_resp_length;
-            ec_dbl_iter_basis(&Eaux2_Echall2.B1, TORSION_EVEN_POWER - reduced_order, &Ecom_Eaux.B1, &Ecom_Eaux.E1);
             ec_dbl_iter_basis(&Eaux2_Echall2.B1, TORSION_EVEN_POWER - reduced_order, &Ecom_Eaux.B1, &Ecom_Eaux.E1);
             copy_basis(&Eaux2_Echall2.B2, &Eaux2_Echall2.B1);
         }
@@ -804,17 +813,24 @@ protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, const
         }
 
         // computation of the challenge codomain
-        if (!compute_challenge_codomain_signature(sig, sk, &E_chall, &Eaux2_Echall2.E2, &Eaux2_Echall2.B2))
-            assert(0); // this shouldn't fail
+        if (!compute_challenge_codomain_signature(sig, sk, &E_chall, &Eaux2_Echall2.E2, &Eaux2_Echall2.B2)) {
+            // The isomorphism computation has a documented low-probability
+            // exceptional case. Start with a fresh commitment and restore the
+            // challenge curve on the next iteration.
+            ret = 0;
+            copy_curve(&E_chall, &sk->curve);
+            continue;
+        }
     }
 
     // Set to the signature the Montgomery A-coefficient of E_aux_2
     set_aux_curve_signature(sig, &Eaux2_Echall2.E1);
 
     // Set the basis change matrix from canonical bases to the supplied bases
-    compute_and_set_basis_change_matrix(
-        sig, &Eaux2_Echall2.B1, &Eaux2_Echall2.B2, &Eaux2_Echall2.E1, &E_chall, reduced_order);
-    (void)0;
+    if (!compute_and_set_basis_change_matrix(
+            sig, &Eaux2_Echall2.B1, &Eaux2_Echall2.B2, &Eaux2_Echall2.E1, &E_chall, reduced_order)) {
+        ret = 0;
+    }
 
 cleanup:
     quat_alg_elem_finalize(&resp_quat);
@@ -825,8 +841,6 @@ cleanup:
     ibz_finalize(&remain);
     ibz_finalize(&degree_resp_inv);
     ibz_finalize(&random_aux_norm);
-
-    fprintf(stderr, "[SIGN_RETRIES] %d\n", sign_retries);
 
     return ret;
 }

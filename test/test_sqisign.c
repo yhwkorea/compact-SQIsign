@@ -64,6 +64,7 @@ test_sqisign(unsigned long long in_msglen)
     unsigned char *msg = malloc(msg_size);
     unsigned char *opened = malloc(signed_size);
     unsigned char *work = malloc(signed_size);
+    unsigned char invalid_pk[CRYPTO_PUBLICKEYBYTES];
     unsigned long long smlen = 0;
     unsigned long long opened_len = 0;
     int result = 1;
@@ -122,6 +123,21 @@ test_sqisign(unsigned long long in_msglen)
     if (sqisign_verify(msg, in_msglen, sm, CRYPTO_BYTES - 1, pk) == 0 ||
         sqisign_verify(msg, in_msglen, sm, CRYPTO_BYTES + 1, pk) == 0) {
         FAIL("detached signature-length rejection");
+    }
+
+    /* The serialized public curve and auxiliary curve both start with one
+     * fp2 element.  All-ones is outside the canonical range for each base
+     * field component and must be rejected by the release decoder. */
+    memcpy(invalid_pk, pk, sizeof(invalid_pk));
+    memset(invalid_pk, 0xff, CRYPTO_PUBLICKEYBYTES - 1);
+    if (sqisign_verify(msg, in_msglen, sm, CRYPTO_BYTES, invalid_pk) == 0) {
+        FAIL("non-canonical public-key field encoding rejection");
+    }
+
+    memcpy(work, sm, signed_size);
+    memset(work, 0xff, CRYPTO_PUBLICKEYBYTES - 1);
+    if (sqisign_verify(msg, in_msglen, work, CRYPTO_BYTES, pk) == 0) {
+        FAIL("non-canonical signature field encoding rejection");
     }
 
     memset(opened, 0xa5, signed_size);

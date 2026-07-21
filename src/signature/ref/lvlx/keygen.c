@@ -50,7 +50,9 @@
 //     printf("hello");
 
 //     // Compute a deterministic basis with a hint to speed up verification
-//     pk->hint_pk = ec_curve_to_basis_2f_to_hint(&sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER);
+//     if (!ec_curve_to_basis_2f_to_hint(
+//             &sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER, &pk->hint_pk))
+//         return 0;
 
 //     // Assert the deterministic basis we computed has the correct order
 //     assert(test_basis_order_twof(&sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER));
@@ -123,7 +125,10 @@ protocols_keygen(public_key_t *pk, secret_key_t *sk)
     assert(test_basis_order_twof(&B_0_two, &sk->curve, TORSION_EVEN_POWER));
 
     // Compute a deterministic basis with a hint to speed up verification
-    pk->hint_pk = ec_curve_to_basis_2f_to_hint(&sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER);
+    if (!ec_curve_to_basis_2f_to_hint(
+            &sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER, &pk->hint_pk)) {
+        return 0;
+    }
 
     // Assert the deterministic basis we computed has the correct order
     assert(test_basis_order_twof(&sk->canonical_basis, &sk->curve, TORSION_EVEN_POWER));

@@ -414,12 +414,13 @@ int ec_biscalar_mul(ec_point_t *res,
  * @param PQ2 an ec_basis_t
  * @param curve an ec_curve_t
  * @param f an integer
+ * @param hint output hint
  *
- * @return A hint
+ * @return 1 if a basis and hint were generated, 0 if the bounded search failed
  *
  * The algorithm is deterministc
  */
-uint8_t ec_curve_to_basis_2f_to_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f);
+int ec_curve_to_basis_2f_to_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, uint8_t *hint);
 
 /**
  * @brief Generate a 2^f-torsion basis from a Montgomery curve and a given hint

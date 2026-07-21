@@ -178,3 +178,30 @@ jobs:
           fi
           cmake --build build
           CTEST_OUTPUT_ON_FAILURE=1 ctest -j4 -V --test-dir build -E "KAT$"
+
+  fixed-precision-overflow:
+    runs-on: [self-hosted, x64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure fixed-precision overflow checks
+        run: >-
+          cmake -B ${{github.workspace}}/build-overflow
+          -DCMAKE_BUILD_TYPE=Release
+          -DSQISIGN_BUILD_TYPE=ref
+          -DENABLE_GMP=OFF
+          -DENABLE_SIGN=ON
+          -DENABLE_TESTS=ON
+          -DENABLE_KAT_TESTS=OFF
+          -DENABLE_INTBIG_OVERFLOW_CHECK=ON
+          -DSQISIGN_TEST_REPS=1
+          -G Ninja
+
+      - name: Build fixed-precision overflow checks
+        run: cmake --build ${{github.workspace}}/build-overflow
+
+      - name: Test arithmetic and protocol paths at all levels
+        run: >-
+          ctest --test-dir ${{github.workspace}}/build-overflow
+          --output-on-failure -j3
+          -R 'sqisign_test_quaternion_lvl[135]$|sqisign_lvl[135]_CORRECTNESS$|sqisign_test_threadsafety_lvl[135]$'

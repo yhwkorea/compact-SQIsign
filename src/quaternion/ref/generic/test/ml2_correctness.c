@@ -5,6 +5,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#if defined(SQISIGN_ML2_PROFILE)
+#include <pthread.h>
+#endif
+
 #define ML2_TEST_MAX_GENERATORS 16
 
 static const int32_t ML2_TEST_D8_COEFFICIENTS[8][4] = {
@@ -17,6 +21,10 @@ static const int32_t ML2_TEST_D8_COEFFICIENTS[8][4] = {
     { 0, 0, 1, 1 },
     { 1, 0, 1, -1 },
 };
+
+static int ml2_test_vector_arrays_identical(const ibz_vec_4_t *a,
+                                            const ibz_vec_4_t *b,
+                                            int count);
 
 static void
 ml2_test_set_target_hnf(ibz_mat_4x4_t *target)
@@ -70,6 +78,7 @@ ml2_test_span_matches_hnf(const char *name,
     int failed = 0;
     int rho;
     int retry_rho;
+    quat_alg_t alg;
     ibz_t modulus, actual_det;
     ibz_vec_4_t reduced[4], retried[4];
     ibz_mat_4x4_t independent, expected_hnf;
@@ -77,6 +86,7 @@ ml2_test_span_matches_hnf(const char *name,
 
     ibz_init(&modulus);
     ibz_init(&actual_det);
+    quat_alg_init_set_ui(&alg, 367);
     ibz_mat_4x4_init(&independent);
     ibz_mat_4x4_init(&expected_hnf);
     quat_lattice_init(&actual);
@@ -104,7 +114,7 @@ ml2_test_span_matches_hnf(const char *name,
         goto cleanup;
     }
 
-    rho = quat_ml2(reduced, 4, generators, d, NULL);
+    rho = quat_ml2(reduced, 4, generators, d, &alg);
     if (rho != 4) {
         printf("[%s] FAIL: expected rho=4, got rho=%d\n", name, rho);
         failed = 1;
@@ -113,7 +123,7 @@ ml2_test_span_matches_hnf(const char *name,
 
     /* The retry wrapper must be a byte-for-byte transparent fast path when
      * the first (unpermuted) ML2 attempt succeeds. */
-    retry_rho = quat_ml2_retry(retried, 4, generators, d, NULL);
+    retry_rho = quat_ml2_retry(retried, 4, generators, d, &alg);
     if (retry_rho != 4) {
         printf("[%s] FAIL: retry rejected a successful first attempt (rho=%d)\n",
                name,
@@ -160,6 +170,168 @@ cleanup:
     ibz_mat_4x4_finalize(&independent);
     ibz_finalize(&actual_det);
     ibz_finalize(&modulus);
+    quat_alg_finalize(&alg);
+    return failed;
+}
+
+static void
+ml2_test_weighted_dot(ibz_t *dot,
+                      const ibz_vec_4_t *a,
+                      const ibz_vec_4_t *b,
+                      const quat_alg_t *alg)
+{
+    ibz_t term;
+    ibz_init(&term);
+    ibz_set(dot, 0);
+    for (int coordinate = 0; coordinate < 4; coordinate++) {
+        ibz_mul(&term, &(*a)[coordinate], &(*b)[coordinate]);
+        if (coordinate >= 2)
+            ibz_mul(&term, &term, &alg->p);
+        ibz_add(dot, dot, &term);
+    }
+    ibz_finalize(&term);
+}
+
+/* Verify the exact two-vector consequences of ML2's configured eta=0.505 and
+ * delta=0.995 under the reduced-norm bilinear form. */
+static int
+ml2_test_weighted_pair_is_lll(const ibz_vec_4_t basis[2],
+                              const quat_alg_t *alg)
+{
+    int ok;
+    ibz_t norm0, norm1, dot, abs_dot, lhs, rhs;
+    ibz_init(&norm0);
+    ibz_init(&norm1);
+    ibz_init(&dot);
+    ibz_init(&abs_dot);
+    ibz_init(&lhs);
+    ibz_init(&rhs);
+
+    ml2_test_weighted_dot(&norm0, &basis[0], &basis[0], alg);
+    ml2_test_weighted_dot(&norm1, &basis[1], &basis[1], alg);
+    ml2_test_weighted_dot(&dot, &basis[1], &basis[0], alg);
+    ibz_abs(&abs_dot, &dot);
+
+    /* 200*|<b1,b0>| <= 101*||b0||^2. */
+    ibz_set(&lhs, 200);
+    ibz_mul(&lhs, &lhs, &abs_dot);
+    ibz_set(&rhs, 101);
+    ibz_mul(&rhs, &rhs, &norm0);
+    ok = ibz_cmp(&lhs, &rhs) <= 0;
+
+    /* ||b1||^2 >= 0.995*||b0||^2. */
+    ibz_set(&lhs, 200);
+    ibz_mul(&lhs, &lhs, &norm1);
+    ibz_set(&rhs, 199);
+    ibz_mul(&rhs, &rhs, &norm0);
+    ok &= ibz_cmp(&lhs, &rhs) >= 0;
+
+    ibz_finalize(&rhs);
+    ibz_finalize(&lhs);
+    ibz_finalize(&abs_dot);
+    ibz_finalize(&dot);
+    ibz_finalize(&norm1);
+    ibz_finalize(&norm0);
+    return ok;
+}
+
+static int
+ml2_test_weighted_gram_and_precision(void)
+{
+    int failed = 0;
+    int weighted_rho, euclidean_rho;
+    quat_alg_t alg, large_alg;
+    ibz_vec_4_t generators[2], weighted[2], euclidean[2], boundary[1], out[1];
+    ibz_t determinant, tmp;
+
+    quat_alg_init_set_ui(&alg, 101);
+    quat_alg_init_set_ui(&large_alg, 3);
+    for (int i = 0; i < 2; i++) {
+        ibz_vec_4_init(&generators[i]);
+        ibz_vec_4_init(&weighted[i]);
+        ibz_vec_4_init(&euclidean[i]);
+    }
+    ibz_vec_4_init(&boundary[0]);
+    ibz_vec_4_init(&out[0]);
+    ibz_init(&determinant);
+    ibz_init(&tmp);
+
+    /* Euclidean ML2 yields (1,0,1,0),(1,0,-1,0).  With p=101 the first
+     * vector is expensive in coordinate 2, so reduced-norm ML2 instead puts
+     * (2,0,0,0) first and leaves (1,0,1,0) second. */
+    ibz_set(&generators[0][0], 1);
+    ibz_set(&generators[0][2], 1);
+    ibz_set(&generators[1][0], 2);
+    weighted_rho = quat_ml2(weighted, 2, generators, 2, &alg);
+    euclidean_rho = quat_ml2(euclidean, 2, generators, 2, NULL);
+    if (weighted_rho != 2 || euclidean_rho != 2) {
+        printf("[ml2_weighted] FAIL: ranks weighted/euclidean=%d/%d\n",
+               weighted_rho,
+               euclidean_rho);
+        failed = 1;
+    } else {
+        if (ml2_test_vector_arrays_identical(weighted, euclidean, 2)) {
+            printf("[ml2_weighted] FAIL: alg->p did not affect reduction\n");
+            failed = 1;
+        }
+        if (!ml2_test_weighted_pair_is_lll(weighted, &alg)) {
+            printf("[ml2_weighted] FAIL: output is not reduced-norm LLL\n");
+            failed = 1;
+        }
+        if (ml2_test_weighted_pair_is_lll(euclidean, &alg)) {
+            printf("[ml2_weighted] FAIL: Euclidean fixture unexpectedly passes weighted LLL\n");
+            failed = 1;
+        }
+
+        /* Projected determinant proves both outputs retain the input's
+         * rank-two Z-span (index 2 in the coordinate-0/2 plane). */
+        for (int which = 0; which < 2; which++) {
+            const ibz_vec_4_t *basis = which == 0 ? weighted : euclidean;
+            ibz_mul(&determinant, &basis[0][0], &basis[1][2]);
+            ibz_mul(&tmp, &basis[0][2], &basis[1][0]);
+            ibz_sub(&determinant, &determinant, &tmp);
+            ibz_abs(&determinant, &determinant);
+            if (ibz_cmp_int32(&determinant, 2) != 0 ||
+                !ibz_is_zero(&basis[0][1]) || !ibz_is_zero(&basis[0][3]) ||
+                !ibz_is_zero(&basis[1][1]) || !ibz_is_zero(&basis[1][3])) {
+                printf("[ml2_weighted] FAIL: output changed the rank-two span\n");
+                failed = 1;
+            }
+        }
+    }
+
+    /* p has 65 bits.  The same large value is safe in coordinate 0, where p
+     * must not be charged, but unsafe in weighted coordinate 2. */
+    ibz_set(&large_alg.p, 1);
+    ibz_mul_2exp(&large_alg.p, &large_alg.p, 64);
+    ibz_set(&tmp, 3);
+    ibz_add(&large_alg.p, &large_alg.p, &tmp);
+    ibz_set(&boundary[0][0], 1);
+    ibz_mul_2exp(&boundary[0][0], &boundary[0][0],
+                 (IBZ_BITS - 65) / 2 + 1);
+    if (quat_ml2(out, 1, boundary, 1, &large_alg) != 1) {
+        printf("[ml2_weighted_precision] FAIL: p was charged to coordinate 0\n");
+        failed = 1;
+    }
+    ibz_copy(&boundary[0][2], &boundary[0][0]);
+    ibz_set(&boundary[0][0], 0);
+    if (quat_ml2(out, 1, boundary, 1, NULL) != 1 ||
+        quat_ml2(out, 1, boundary, 1, &large_alg) != QUAT_ML2_ERR_PRECISION) {
+        printf("[ml2_weighted_precision] FAIL: weighted p overflow was not isolated\n");
+        failed = 1;
+    }
+
+    ibz_finalize(&tmp);
+    ibz_finalize(&determinant);
+    ibz_vec_4_finalize(&out[0]);
+    ibz_vec_4_finalize(&boundary[0]);
+    for (int i = 0; i < 2; i++) {
+        ibz_vec_4_finalize(&euclidean[i]);
+        ibz_vec_4_finalize(&weighted[i]);
+        ibz_vec_4_finalize(&generators[i]);
+    }
+    quat_alg_finalize(&large_alg);
+    quat_alg_finalize(&alg);
     return failed;
 }
 
@@ -182,6 +354,126 @@ ml2_test_span_d8(void)
     for (int i = 0; i < 8; i++)
         ibz_vec_4_finalize(&generators[i]);
     ibz_mat_4x4_finalize(&target);
+    return failed;
+}
+
+/* A zero first generator used to leave r[0][0] equal to zero.  CFA then
+ * evaluated 0/0 while processing the next generator, and the resulting NaNs
+ * could make ML2 report the number of nonzero generators instead of their
+ * actual rank.  Exercise the minimal five-generator reproducer and all
+ * production generator counts with a leading zero and further exact
+ * dependencies.  The fixtures span Z^rank in the first `rank` coordinates,
+ * so adjoining the remaining standard vectors must give determinant one. */
+static int
+ml2_test_zero_and_dependent_dimension(int d)
+{
+    int failed = 0;
+    int expected_rank = d == 4 ? 2 : 3;
+    int rho;
+    quat_alg_t alg;
+    ibz_t determinant;
+    ibz_vec_4_t generators[ML2_TEST_MAX_GENERATORS];
+    ibz_vec_4_t output[4];
+    ibz_mat_4x4_t completed_basis;
+
+    quat_alg_init_set_ui(&alg, 367);
+    ibz_init(&determinant);
+    ibz_mat_4x4_init(&completed_basis);
+    for (int i = 0; i < d; i++)
+        ibz_vec_4_init(&generators[i]);
+    for (int i = 0; i < 4; i++) {
+        ibz_vec_4_init(&output[i]);
+        for (int coordinate = 0; coordinate < 4; coordinate++)
+            ibz_set(&output[i][coordinate], -7001 - 4 * i - coordinate);
+    }
+
+    /* [0,e0,e0,e1] at d=4, and the same prefix followed by e2 and
+     * dependent combinations of e0,e1,e2 at every larger fixture. */
+    ibz_set(&generators[1][0], 1);
+    ibz_set(&generators[2][0], 1);
+    ibz_set(&generators[3][1], 1);
+    if (d > 4)
+        ibz_set(&generators[4][2], 1);
+    for (int i = 5; i < d; i++) {
+        ibz_set(&generators[i][(i - 5) % expected_rank], 1);
+        ibz_set(&generators[i][(i - 4) % expected_rank],
+                (i & 1) == 0 ? 1 : -1);
+    }
+
+    rho = quat_ml2(output, 4, generators, d, &alg);
+    if (rho != expected_rank) {
+        printf("[ml2_zero_dependent_d%d] FAIL: expected rho=%d, got %d\n",
+               d,
+               expected_rank,
+               rho);
+        failed = 1;
+        goto all_zero;
+    }
+
+    ibz_mat_4x4_zero(&completed_basis);
+    for (int col = 0; col < expected_rank; col++) {
+        for (int row = 0; row < 4; row++)
+            ibz_copy(&completed_basis[row][col], &output[col][row]);
+        for (int row = expected_rank; row < 4; row++) {
+            if (!ibz_is_zero(&output[col][row])) {
+                printf("[ml2_zero_dependent_d%d] FAIL: output left the input span\n",
+                       d);
+                failed = 1;
+            }
+        }
+    }
+    for (int col = expected_rank; col < 4; col++)
+        ibz_set(&completed_basis[col][col], 1);
+    ibz_mat_4x4_inv_with_det_as_denom(NULL, &determinant, &completed_basis);
+    ibz_abs(&determinant, &determinant);
+    if (!ibz_is_one(&determinant)) {
+        printf("[ml2_zero_dependent_d%d] FAIL: output changed the exact span\n",
+               d);
+        failed = 1;
+    }
+    for (int i = expected_rank; i < 4; i++) {
+        for (int coordinate = 0; coordinate < 4; coordinate++) {
+            if (ibz_cmp_int32(&output[i][coordinate],
+                              -7001 - 4 * i - coordinate) != 0) {
+                printf("[ml2_zero_dependent_d%d] FAIL: wrote past rho\n", d);
+                failed = 1;
+                goto all_zero;
+            }
+        }
+    }
+
+all_zero:
+    for (int i = 0; i < d; i++)
+        for (int coordinate = 0; coordinate < 4; coordinate++)
+            ibz_set(&generators[i][coordinate], 0);
+    for (int i = 0; i < 4; i++)
+        for (int coordinate = 0; coordinate < 4; coordinate++)
+            ibz_set(&output[i][coordinate], 8001 + 4 * i + coordinate);
+    rho = quat_ml2(output, 4, generators, d, &alg);
+    if (rho != 0) {
+        printf("[ml2_all_zero_d%d] FAIL: expected rho=0, got %d\n", d, rho);
+        failed = 1;
+    }
+    for (int i = 0; i < 4; i++) {
+        for (int coordinate = 0; coordinate < 4; coordinate++) {
+            if (ibz_cmp_int32(&output[i][coordinate],
+                              8001 + 4 * i + coordinate) != 0) {
+                printf("[ml2_all_zero_d%d] FAIL: rank-zero call modified output\n",
+                       d);
+                failed = 1;
+                goto cleanup;
+            }
+        }
+    }
+
+cleanup:
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_finalize(&output[i]);
+    for (int i = 0; i < d; i++)
+        ibz_vec_4_finalize(&generators[i]);
+    ibz_mat_4x4_finalize(&completed_basis);
+    ibz_finalize(&determinant);
+    quat_alg_finalize(&alg);
     return failed;
 }
 
@@ -320,6 +612,219 @@ ml2_retry_test_reducer(ibz_vec_4_t *output,
     /* Check that the wrapper returns the first failure code, not the last. */
     return attempt == 0 ? 3 : -1;
 }
+
+#if defined(SQISIGN_ML2_PROFILE)
+typedef enum {
+    ML2_PROFILE_TEST_RECOVER,
+    ML2_PROFILE_TEST_EXHAUST,
+} ml2_profile_test_mode_t;
+
+static struct {
+    ml2_profile_test_mode_t mode;
+    int calls;
+    uint64_t hashes[QUAT_ML2_RETRY_MAX_ATTEMPTS];
+} ml2_profile_test_reducer_state;
+
+static int
+ml2_profile_test_reducer(ibz_vec_4_t *output,
+                         int out_capacity,
+                         const ibz_vec_4_t *input,
+                         int d,
+                         const quat_alg_t *alg)
+{
+    int attempt = ml2_profile_test_reducer_state.calls++;
+    if (attempt < QUAT_ML2_RETRY_MAX_ATTEMPTS)
+        ml2_profile_test_reducer_state.hashes[attempt] =
+            ml2_test_hash_generators(input, d);
+    if (ml2_profile_test_reducer_state.mode == ML2_PROFILE_TEST_RECOVER &&
+        attempt == 1)
+        return quat_ml2(output, out_capacity, input, d, alg);
+    return -1;
+}
+
+static void
+ml2_profile_test_reducer_reset(ml2_profile_test_mode_t mode)
+{
+    ml2_profile_test_reducer_state.mode = mode;
+    ml2_profile_test_reducer_state.calls = 0;
+    for (int i = 0; i < QUAT_ML2_RETRY_MAX_ATTEMPTS; i++)
+        ml2_profile_test_reducer_state.hashes[i] = 0;
+}
+
+static int
+ml2_profile_dimension_equals(const quat_ml2_profile_dimension_t *profile,
+                             uint64_t inputs,
+                             uint64_t precision_rejected,
+                             uint64_t first_failures,
+                             uint64_t recovered_1,
+                             uint64_t recovered_2,
+                             uint64_t recovered_3,
+                             uint64_t exhausted,
+                             uint64_t underlying_attempts)
+{
+    return profile->inputs == inputs &&
+           profile->precision_rejected == precision_rejected &&
+           profile->first_attempt_failures == first_failures &&
+           profile->recovered[0] == recovered_1 &&
+           profile->recovered[1] == recovered_2 &&
+           profile->recovered[2] == recovered_3 &&
+           profile->exhausted == exhausted &&
+           profile->underlying_attempts == underlying_attempts;
+}
+
+#define ML2_PROFILE_THREAD_COUNT 4
+#define ML2_PROFILE_THREAD_ITERATIONS 25
+
+typedef struct {
+    const quat_alg_t *alg;
+    int failed;
+} ml2_profile_thread_argument_t;
+
+static void *
+ml2_profile_thread_worker(void *opaque)
+{
+    ml2_profile_thread_argument_t *argument = opaque;
+    ibz_vec_4_t generators[4];
+    ibz_mat_4x4_t basis;
+    int rank;
+
+    ibz_mat_4x4_init(&basis);
+    for (int i = 0; i < 4; i++) {
+        ibz_vec_4_init(&generators[i]);
+        ibz_set(&generators[i][i], 1);
+    }
+
+    argument->failed = 0;
+    for (int iteration = 0; iteration < ML2_PROFILE_THREAD_ITERATIONS;
+         iteration++) {
+        quat_mlll(&basis, &rank, generators, 4, argument->alg);
+        if (rank != 4) {
+            argument->failed = 1;
+            break;
+        }
+    }
+
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_finalize(&generators[i]);
+    ibz_mat_4x4_finalize(&basis);
+    return NULL;
+}
+
+static int
+ml2_test_profile_accounting(void)
+{
+    int failed = 0;
+    int rho;
+    int rank;
+    quat_alg_t alg;
+    ibz_vec_4_t generators[4], output[4];
+    ibz_mat_4x4_t basis;
+    quat_ml2_profile_t profile;
+    pthread_t threads[ML2_PROFILE_THREAD_COUNT];
+    ml2_profile_thread_argument_t arguments[ML2_PROFILE_THREAD_COUNT];
+
+    quat_alg_init_set_ui(&alg, 101);
+    ibz_mat_4x4_init(&basis);
+    for (int i = 0; i < 4; i++) {
+        ibz_vec_4_init(&generators[i]);
+        ibz_vec_4_init(&output[i]);
+        ibz_set(&generators[i][i], 1);
+    }
+
+    /* The actual quat_mlll callsite must count one logical input and its one
+     * successful attempt, rather than bypassing the retry profiler. */
+    quat_ml2_profile_reset();
+    quat_mlll(&basis, &rank, generators, 4, &alg);
+    quat_ml2_profile_get(&profile);
+    if (rank != 4 ||
+        !ml2_profile_dimension_equals(
+            &profile.d4, 1, 0, 0, 0, 0, 0, 0, 1)) {
+        printf("[ml2_profile_mlll] FAIL: first-success accounting is incorrect\n");
+        failed = 1;
+    }
+
+    /* A failed attempt 0 followed by recovery must execute exactly the
+     * rotated ordering once and record recovered_1. */
+    quat_ml2_profile_reset();
+    ml2_profile_test_reducer_reset(ML2_PROFILE_TEST_RECOVER);
+    rho = quat_ml2_mlll_with_reducer(
+        output, 4, generators, 4, &alg, ml2_profile_test_reducer);
+    quat_ml2_profile_get(&profile);
+    if (rho != 4 || ml2_profile_test_reducer_state.calls != 2 ||
+        ml2_profile_test_reducer_state.hashes[0] ==
+            ml2_profile_test_reducer_state.hashes[1] ||
+        !ml2_profile_dimension_equals(
+            &profile.d4, 1, 0, 1, 1, 0, 0, 0, 2)) {
+        printf("[ml2_profile_mlll] FAIL: recovery accounting/order is incorrect\n");
+        failed = 1;
+    }
+
+    quat_ml2_profile_reset();
+    ml2_profile_test_reducer_reset(ML2_PROFILE_TEST_EXHAUST);
+    rho = quat_ml2_mlll_with_reducer(
+        output, 4, generators, 4, &alg, ml2_profile_test_reducer);
+    quat_ml2_profile_get(&profile);
+    if (rho != -1 ||
+        ml2_profile_test_reducer_state.calls != QUAT_ML2_RETRY_MAX_ATTEMPTS ||
+        !ml2_profile_dimension_equals(
+            &profile.d4, 1, 0, 1, 0, 0, 0, 1, 4)) {
+        printf("[ml2_profile_mlll] FAIL: exhausted accounting is incorrect\n");
+        failed = 1;
+    }
+
+    /* Precision rejection is a logical input but executes no reducer. */
+    ibz_set(&generators[0][0], 1);
+    ibz_mul_2exp(&generators[0][0], &generators[0][0], IBZ_BITS / 2);
+    quat_ml2_profile_reset();
+    ml2_profile_test_reducer_reset(ML2_PROFILE_TEST_EXHAUST);
+    rho = quat_ml2_mlll_with_reducer(
+        output, 4, generators, 4, &alg, ml2_profile_test_reducer);
+    quat_ml2_profile_get(&profile);
+    if (rho != QUAT_ML2_ERR_PRECISION ||
+        ml2_profile_test_reducer_state.calls != 0 ||
+        !ml2_profile_dimension_equals(
+            &profile.d4, 1, 1, 0, 0, 0, 0, 0, 0)) {
+        printf("[ml2_profile_mlll] FAIL: precision accounting is incorrect\n");
+        failed = 1;
+    }
+    ibz_set(&generators[0][0], 1);
+
+    /* Concurrent first-success calls must not lose atomic increments. */
+    quat_ml2_profile_reset();
+    int created = 0;
+    for (int i = 0; i < ML2_PROFILE_THREAD_COUNT; i++) {
+        arguments[i].alg = &alg;
+        arguments[i].failed = 0;
+        if (pthread_create(
+                &threads[i], NULL, ml2_profile_thread_worker, &arguments[i]) != 0) {
+            failed = 1;
+            break;
+        }
+        created++;
+    }
+    for (int i = 0; i < created; i++) {
+        if (pthread_join(threads[i], NULL) != 0 || arguments[i].failed)
+            failed = 1;
+    }
+    quat_ml2_profile_get(&profile);
+    uint64_t expected =
+        (uint64_t)created * (uint64_t)ML2_PROFILE_THREAD_ITERATIONS;
+    if (created != ML2_PROFILE_THREAD_COUNT ||
+        !ml2_profile_dimension_equals(
+            &profile.d4, expected, 0, 0, 0, 0, 0, 0, expected)) {
+        printf("[ml2_profile_threads] FAIL: concurrent counters are incorrect\n");
+        failed = 1;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        ibz_vec_4_finalize(&output[i]);
+        ibz_vec_4_finalize(&generators[i]);
+    }
+    ibz_mat_4x4_finalize(&basis);
+    quat_alg_finalize(&alg);
+    return failed;
+}
+#endif
 
 static int
 ml2_test_output_matches_hnf(const ibz_vec_4_t output[4],
@@ -502,6 +1007,71 @@ ml2_test_lattice_identical(const quat_lattice_t *a, const quat_lattice_t *b)
 {
     return ibz_cmp(&a->denom, &b->denom) == 0 &&
            ibz_mat_4x4_equal(&a->basis, &b->basis);
+}
+
+static int
+ml2_test_multiplication_alias_and_nonpublication(void)
+{
+    int failed = 0;
+    quat_alg_t alg;
+    quat_lattice_t lat1, lat2, expected, result, alias_left, alias_right, before;
+
+    quat_alg_init_set_ui(&alg, 3);
+    quat_lattice_init(&lat1);
+    quat_lattice_init(&lat2);
+    quat_lattice_init(&expected);
+    quat_lattice_init(&result);
+    quat_lattice_init(&alias_left);
+    quat_lattice_init(&alias_right);
+    quat_lattice_init(&before);
+
+    ml2_test_set_scalar_lattice(&lat1, 2, 1);
+    ml2_test_set_scalar_lattice(&lat2, 3, 1);
+    ml2_test_set_scalar_lattice(&expected, 6, 1);
+
+    ml2_test_set_scalar_lattice(&result, 17, 19);
+    if (!quat_lattice_mul_mlll(&result, &lat1, &lat2, &alg) ||
+        !quat_lattice_equal(&result, &expected)) {
+        printf("[mlll_mul] FAIL: scalar product lattice is incorrect\n");
+        failed = 1;
+    }
+
+    ml2_test_copy_lattice(&alias_left, &lat1);
+    if (!quat_lattice_mul_mlll(&alias_left, &alias_left, &lat2, &alg) ||
+        !quat_lattice_equal(&alias_left, &expected)) {
+        printf("[mlll_mul_alias] FAIL: res == lat1 is not alias-safe\n");
+        failed = 1;
+    }
+
+    ml2_test_copy_lattice(&alias_right, &lat2);
+    if (!quat_lattice_mul_mlll(&alias_right, &lat1, &alias_right, &alg) ||
+        !quat_lattice_equal(&alias_right, &expected)) {
+        printf("[mlll_mul_alias] FAIL: res == lat2 is not alias-safe\n");
+        failed = 1;
+    }
+
+    /* Force the product-coordinate preflight to reject before arithmetic;
+     * the destination must remain byte-for-byte unchanged. */
+    ml2_test_set_scalar_lattice(&lat1, 1, 1);
+    ibz_set(&lat1.basis[0][0], 1);
+    ibz_mul_2exp(&lat1.basis[0][0], &lat1.basis[0][0], IBZ_BITS - 3);
+    ml2_test_set_scalar_lattice(&result, 23, 29);
+    ml2_test_copy_lattice(&before, &result);
+    if (quat_lattice_mul_mlll(&result, &lat1, &lat2, &alg) != 0 ||
+        !ml2_test_lattice_identical(&result, &before)) {
+        printf("[mlll_mul_failure] FAIL: precision rejection modified output\n");
+        failed = 1;
+    }
+
+    quat_lattice_finalize(&before);
+    quat_lattice_finalize(&alias_right);
+    quat_lattice_finalize(&alias_left);
+    quat_lattice_finalize(&result);
+    quat_lattice_finalize(&expected);
+    quat_lattice_finalize(&lat2);
+    quat_lattice_finalize(&lat1);
+    quat_alg_finalize(&alg);
+    return failed;
 }
 
 static int
@@ -820,7 +1390,10 @@ typedef struct {
 } ml2_stress_counts_t;
 
 static int
-ml2_stress_dimension(int d, uint32_t samples, ml2_stress_counts_t *counts)
+ml2_stress_dimension(int d,
+                     uint32_t samples,
+                     ml2_stress_counts_t *counts,
+                     const quat_alg_t *alg)
 {
     ibz_mat_4x4_t target;
     ibz_mat_4x4_init(&target);
@@ -845,8 +1418,8 @@ ml2_stress_dimension(int d, uint32_t samples, ml2_stress_counts_t *counts)
             }
         }
 
-        int base_rho = quat_ml2(base_output, 4, generators, d, NULL);
-        int retry_rho = quat_ml2_retry(retry_output, 4, generators, d, NULL);
+        int base_rho = quat_ml2(base_output, 4, generators, d, alg);
+        int retry_rho = quat_ml2_retry(retry_output, 4, generators, d, alg);
         if (base_rho != 4)
             counts->base_failures++;
         if (retry_rho != 4)
@@ -884,7 +1457,9 @@ quat_test_ml2_stress(uint32_t samples)
     static const int dimensions[] = { 4, 8, 16 };
     const uint64_t seed = UINT64_C(0x6d6c325f73747273);
     int failed = 0;
+    quat_alg_t alg;
 
+    quat_alg_init_set_ui(&alg, 367);
     ml2_stress_prng_state = seed;
     printf("ML2_STRESS_V1 seed=0x%016llx samples_per_d=%u "
            "coefficient_bit_bands=12,55,80,IBZ_BITS/4,IBZ_BITS/2-16(+0..7)\n",
@@ -897,7 +1472,7 @@ quat_test_ml2_stress(uint32_t samples)
     for (size_t i = 0; i < sizeof(dimensions) / sizeof(dimensions[0]); i++) {
         ml2_stress_counts_t counts = { 0 };
         int d = dimensions[i];
-        failed |= ml2_stress_dimension(d, samples, &counts);
+        failed |= ml2_stress_dimension(d, samples, &counts, &alg);
         printf("%d,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d\n",
                d,
                samples,
@@ -914,6 +1489,7 @@ quat_test_ml2_stress(uint32_t samples)
                counts.max_input_bits);
     }
 
+    quat_alg_finalize(&alg);
     return failed;
 }
 
@@ -1000,11 +1576,20 @@ quat_test_ml2_correctness(void)
 {
     int failed = 0;
     printf("\nRunning ML2 exact-span and failure-publication tests\n");
+    failed |= ml2_test_weighted_gram_and_precision();
+    failed |= ml2_test_zero_and_dependent_dimension(4);
+    failed |= ml2_test_zero_and_dependent_dimension(5);
+    failed |= ml2_test_zero_and_dependent_dimension(8);
+    failed |= ml2_test_zero_and_dependent_dimension(16);
     failed |= ml2_test_span_d8();
     failed |= ml2_test_span_d16_high_dynamic();
     failed |= ml2_test_retry_recovery_and_nonpublication();
     failed |= ml2_test_addition_and_failure_nonpublication();
+    failed |= ml2_test_multiplication_alias_and_nonpublication();
     failed |= ml2_test_ideal_construction_mod_N();
+#if defined(SQISIGN_ML2_PROFILE)
+    failed |= ml2_test_profile_accounting();
+#endif
     if (!failed)
         printf("  All ML2 correctness tests PASS\n");
     return failed;

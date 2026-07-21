@@ -1,14 +1,15 @@
 #include <quaternion.h>
 #include "internal.h"
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
 // Random prime generation for tests
 int
 ibz_generate_random_prime(ibz_t *p, int is3mod4, int bitsize, int probability_test_iterations)
 {
-    assert(bitsize != 0);
+    if (p == NULL || bitsize < 2 || bitsize >= IBZ_BITS - 1 ||
+        probability_test_iterations <= 0)
+        return 0;
     int found = 0;
     ibz_t two_pow, two_powp;
 
@@ -17,16 +18,9 @@ ibz_generate_random_prime(ibz_t *p, int is3mod4, int bitsize, int probability_te
     ibz_pow(&two_pow, &ibz_const_two, (bitsize - 1) - (0 != is3mod4));
     ibz_pow(&two_powp, &ibz_const_two, bitsize - (0 != is3mod4));
 
-    int cnt = 0;
-    while (!found) {
-        cnt++;
-        if (cnt % 100000 == 0) {
-            printf("Random prime generation is still running after %d attempts, this is not "
-                   "normal! The expected number of attempts is %d \n",
-                   cnt,
-                   bitsize);
-        }
-        ibz_rand_interval(p, &two_pow, &two_powp);
+    for (int cnt = 0; cnt < 1000000 && !found; ++cnt) {
+        if (!ibz_rand_interval(p, &two_pow, &two_powp))
+            break;
         ibz_add(p, p, p);
         if (is3mod4) {
             ibz_add(p, p, p);

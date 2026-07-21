@@ -66,7 +66,10 @@ bench_isog_strategy(unsigned int Nbench)
     ec_curve_init(&E0);
     fp2_set_small(&(E0.A), 6);
     fp2_set_one(&(E0.C));
-    (void)ec_curve_to_basis_2f_to_hint(&basis2, &E0, TORSION_EVEN_POWER);
+    uint8_t hint;
+    if (!ec_curve_to_basis_2f_to_hint(&basis2, &E0, TORSION_EVEN_POWER, &hint)) {
+        return 0;
+    }
     for (i = 0; i < Nbench; i++) {
         copy_curve(&phi[i].curve, &E0);
         phi[i].length = TORSION_EVEN_POWER;

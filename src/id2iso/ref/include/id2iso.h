@@ -43,7 +43,7 @@ static const quat_represent_integer_params_t QUAT_represent_integer_params = {
  * @param curve: the curve E the points P, Q, R are defined on
  *
  */
-void ec_biscalar_mul_ibz_vec(ec_point_t *res,
+int ec_biscalar_mul_ibz_vec(ec_point_t *res,
                              const ibz_vec_2_t *scalar_vec,
                              const int f,
                              const ec_basis_t *PQ,
@@ -59,7 +59,7 @@ void ec_biscalar_mul_ibz_vec(ec_point_t *res,
  * norm 2^f
  *
  */
-void id2iso_ideal_to_kernel_dlogs_even(ibz_vec_2_t *ker_dlog, const quat_left_ideal_t *lideal_input);
+int id2iso_ideal_to_kernel_dlogs_even(ibz_vec_2_t *ker_dlog, const quat_left_ideal_t *lideal_input);
 
 /**
  * @brief Applies some 2x2 matrix on a basis of E[2^TORSION_EVEN_POWER]
@@ -89,7 +89,7 @@ int matrix_application_even_basis(ec_basis_t *P, const ec_curve_t *E, ibz_mat_2x
  * helper function, works in place
  *
  */
-void endomorphism_application_even_basis(ec_basis_t *P,
+int endomorphism_application_even_basis(ec_basis_t *P,
                                          const int index_alternate_curve,
                                          const ec_curve_t *E,
                                          const quat_alg_elem_t *theta,

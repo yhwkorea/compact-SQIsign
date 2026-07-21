@@ -10,4 +10,6 @@ target_include_directories(${LIB_SIGNATURE_${SVARIANT_UPPER}} PRIVATE ${INC_PUBL
 target_compile_options(${LIB_SIGNATURE_${SVARIANT_UPPER}} PRIVATE ${C_OPT_FLAGS})
 target_compile_definitions(${LIB_SIGNATURE_${SVARIANT_UPPER}} PUBLIC SQISIGN_VARIANT=${SVARIANT_LOWER})
 
-add_subdirectory(test)
+if(ENABLE_TESTS)
+    add_subdirectory(test)
+endif()

@@ -43,4 +43,6 @@ ENDFOREACH()
 # For backward compatibility, create an alias for the generic library (defaults to lvl5)
 set(LIB_QUATERNION sqisign_quaternion_lvl5 CACHE INTERNAL "LIB")
 
-add_subdirectory(test)
+if(ENABLE_TESTS)
+    add_subdirectory(test)
+endif()

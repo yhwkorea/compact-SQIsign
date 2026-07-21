@@ -22,7 +22,12 @@ sqisign_keypair(unsigned char *pk, unsigned char *sk)
         return 1;
     }
 
-    secret_key_to_bytes(sk, &skt, &pkt);
+    if (!secret_key_to_bytes(sk, &skt, &pkt)) {
+        memset(pk, 0, PUBLICKEY_BYTES);
+        memset(sk, 0, SECRETKEY_BYTES);
+        secret_key_finalize(&skt);
+        return 1;
+    }
     public_key_to_bytes(pk, &pkt);
     secret_key_finalize(&skt);
     return 0;
@@ -82,8 +87,11 @@ sqisign_open(unsigned char *m,
         return 1;
     }
 
-    public_key_from_bytes(&pkt, pk);
-    signature_from_bytes(&sigt, sm);
+    if (public_key_from_bytes(&pkt, pk) == NULL || !signature_from_bytes(&sigt, sm)) {
+        *mlen = 0;
+        memset(m, 0, smlen - SIGNATURE_BYTES);
+        return 1;
+    }
 
     ret = !protocols_verify(&sigt, &pkt, sm + SIGNATURE_BYTES, smlen - SIGNATURE_BYTES);
 
@@ -114,8 +122,9 @@ sqisign_verify(const unsigned char *m,
         return 1;
     }
 
-    public_key_from_bytes(&pkt, pk);
-    signature_from_bytes(&sigt, sig);
+    if (public_key_from_bytes(&pkt, pk) == NULL || !signature_from_bytes(&sigt, sig)) {
+        return 1;
+    }
 
     ret = !protocols_verify(&sigt, &pkt, m, mlen);
 

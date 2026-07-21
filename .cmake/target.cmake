@@ -86,9 +86,9 @@ elseif (RADIX EQUAL 64)
 endif()
 
 if (UNIX)
-    add_compile_definitions(TARGET_OS_UNIX)
+    add_compile_definitions(SQISIGN_TARGET_OS_UNIX)
 else()
-    add_compile_definitions(TARGET_OS_OTHER)
+    add_compile_definitions(SQISIGN_TARGET_OS_OTHER)
 endif()
 
 set(C_OPT_FLAGS "")

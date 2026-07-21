@@ -36,7 +36,11 @@ biextension_test()
     copy_point(&A24, &curve.A24);
 
     // Compute 2^e torsion on curve
-    (void)ec_curve_to_basis_2f_to_hint(&even_torsion, &curve, e);
+    uint8_t hint;
+    if (!ec_curve_to_basis_2f_to_hint(&even_torsion, &curve, e, &hint)) {
+        fprintf(stderr, "basis generation failed\n");
+        return;
+    }
     copy_point(&P, &even_torsion.P);
     copy_point(&Q, &even_torsion.Q);
     copy_point(&PmQ, &even_torsion.PmQ);

@@ -138,13 +138,16 @@ quat_alg_mul(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg_elem
     quat_alg_coord_mul(&(res->coord), &(a->coord), &(b->coord), alg);
 }
 
-void
+int
 quat_alg_norm_mod(ibz_t *res, const quat_alg_elem_t *x, const ibz_t *N, const quat_alg_t *alg)
 {
     /* paper Issue 14: nrd(x) mod N = (x0^2 + x1^2 + p*x2^2 + p*x3^2) mod N
      * with each ibz_mul reduced before the next operation. Max transient
      * is max(2*log2(N), p_bits + log2(N)), matching paper Lemma 4N^2 when N >= p. */
-    assert(ibz_is_one(&(x->denom)));
+    if (!ibz_is_one(&(x->denom)) || ibz_cmp(N, &ibz_const_zero) <= 0) {
+        ibz_set(res, 0);
+        return 0;
+    }
     ibz_t tmp;
     ibz_init(&tmp);
 
@@ -173,28 +176,19 @@ quat_alg_norm_mod(ibz_t *res, const quat_alg_elem_t *x, const ibz_t *N, const qu
 
     ibz_mod(res, res, N);
 
-    fprintf(stderr, "[ALGNORM-MOD] in_coord_max=%d N=%d out=%d\n",
-        (int)ibz_bitsize(&(x->coord[0])) > (int)ibz_bitsize(&(x->coord[1])) ?
-            (ibz_bitsize(&(x->coord[0])) > ibz_bitsize(&(x->coord[2])) ?
-                (ibz_bitsize(&(x->coord[0])) > ibz_bitsize(&(x->coord[3])) ? ibz_bitsize(&(x->coord[0])) : ibz_bitsize(&(x->coord[3]))) :
-                (ibz_bitsize(&(x->coord[2])) > ibz_bitsize(&(x->coord[3])) ? ibz_bitsize(&(x->coord[2])) : ibz_bitsize(&(x->coord[3])))) :
-            (ibz_bitsize(&(x->coord[1])) > ibz_bitsize(&(x->coord[2])) ?
-                (ibz_bitsize(&(x->coord[1])) > ibz_bitsize(&(x->coord[3])) ? ibz_bitsize(&(x->coord[1])) : ibz_bitsize(&(x->coord[3]))) :
-                (ibz_bitsize(&(x->coord[2])) > ibz_bitsize(&(x->coord[3])) ? ibz_bitsize(&(x->coord[2])) : ibz_bitsize(&(x->coord[3])))),
-        ibz_bitsize(N), ibz_bitsize(res));
-    fflush(stderr);
-
     ibz_finalize(&tmp);
+    return 1;
 }
 
-void
+int
 quat_alg_mul_mod(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg_elem_t *b, const ibz_t *N, const quat_alg_t *alg)
 {
     /* paper Issue 14: (a*b) mod N*O_0 — coords computed with each ibz_mul
      * followed by ibz_mod, max transient = max(2*log2(N), p_bits + log2(N)).
      * Use a local sum[4] so aliasing res==a or res==b is safe. */
-    assert(ibz_is_one(&(a->denom)));
-    assert(ibz_is_one(&(b->denom)));
+    if (!ibz_is_one(&(a->denom)) || !ibz_is_one(&(b->denom)) ||
+        ibz_cmp(N, &ibz_const_zero) <= 0)
+        return 0;
     ibz_t prod;
     ibz_vec_4_t sum;
     ibz_init(&prod);
@@ -270,55 +264,60 @@ quat_alg_mul_mod(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg_
         ibz_copy(&(res->coord[i]), &sum[i]);
     ibz_set(&(res->denom), 1);
 
-    int mx = ibz_bitsize(&(res->coord[0]));
-    for (int i = 1; i < 4; i++) {
-        int b = ibz_bitsize(&(res->coord[i]));
-        if (b > mx) mx = b;
-    }
-    fprintf(stderr, "[ALGMUL-MOD] N=%d out_coord_max=%d\n", ibz_bitsize(N), mx);
-    fflush(stderr);
-
     ibz_finalize(&prod);
     ibz_vec_4_finalize(&sum);
+    return 1;
 }
 
-void
+int
 quat_alg_norm(ibz_t *res_num, ibz_t *res_denom, const quat_alg_elem_t *a, const quat_alg_t *alg)
 {
-    ibz_t r, g;
+    int ok = 0;
+    ibz_t r, g, num, denom;
     quat_alg_elem_t norm;
     ibz_init(&r);
     ibz_init(&g);
+    ibz_init(&num);
+    ibz_init(&denom);
     quat_alg_elem_init(&norm);
+
+    if (res_num == NULL || res_denom == NULL || a == NULL || alg == NULL ||
+        ibz_is_zero(&a->denom) || ibz_cmp(&alg->p, &ibz_const_zero) <= 0)
+        goto cleanup;
 
     quat_alg_conj(&norm, a);
     quat_alg_mul(&norm, a, &norm, alg);
+    if (!ibz_is_zero(&norm.coord[1]) || !ibz_is_zero(&norm.coord[2]) ||
+        !ibz_is_zero(&norm.coord[3]))
+        goto cleanup;
     ibz_gcd(&g, &(norm.coord[0]), &(norm.denom));
-    ibz_div(res_num, &r, &(norm.coord[0]), &g);
-    ibz_div(res_denom, &r, &(norm.denom), &g);
-    ibz_abs(res_denom, res_denom);
-    ibz_abs(res_num, res_num);
-    assert(ibz_cmp(res_denom, &ibz_const_zero) > 0);
+    if (ibz_is_zero(&g))
+        goto cleanup;
+    ibz_div(&num, &r, &(norm.coord[0]), &g);
+    if (!ibz_is_zero(&r))
+        goto cleanup;
+    ibz_div(&denom, &r, &(norm.denom), &g);
+    if (!ibz_is_zero(&r) || ibz_is_zero(&denom))
+        goto cleanup;
+    ibz_abs(&denom, &denom);
+    ibz_abs(&num, &num);
+    ibz_copy(res_num, &num);
+    ibz_copy(res_denom, &denom);
+    ok = 1;
 
-    /* P5 trace: input coord max bit / output norm bit / output denom bit */
-    {
-        int in_max = 0;
-        for (int _i = 0; _i < 4; _i++) {
-            int b = ibz_bitsize(&(a->coord[_i]));
-            if (b > in_max) in_max = b;
-        }
-        int in_den = ibz_bitsize(&(a->denom));
-        int out_num = ibz_bitsize(res_num);
-        int out_den = ibz_bitsize(res_denom);
-        fprintf(stderr, "[ALGNORM] in_coord_max=%d in_den=%d out_num=%d out_den=%d ratio=%.2f\n",
-            in_max, in_den, out_num, out_den,
-            in_max > 0 ? (double)out_num / (double)in_max : 0.0);
-        fflush(stderr);
+cleanup:
+    if (!ok) {
+        if (res_num != NULL)
+            ibz_set(res_num, 0);
+        if (res_denom != NULL)
+            ibz_set(res_denom, 0);
     }
-
     quat_alg_elem_finalize(&norm);
+    ibz_finalize(&denom);
+    ibz_finalize(&num);
     ibz_finalize(&r);
     ibz_finalize(&g);
+    return ok;
 }
 
 void
@@ -341,18 +340,18 @@ quat_alg_conj(quat_alg_elem_t *conj, const quat_alg_elem_t *x)
     ibz_neg(&(conj->coord[3]), &(x->coord[3]));
 }
 
-void
+int
 quat_alg_make_primitive(ibz_vec_4_t *primitive_x, ibz_t *content, const quat_alg_elem_t *x, const quat_lattice_t *order)
 {
-    int ok UNUSED = quat_lattice_contains(primitive_x, order, x);
-    assert(ok);
-    ibz_vec_4_content(content, primitive_x);
-    ibz_t r;
-    ibz_init(&r);
-    for (int i = 0; i < 4; i++) {
-        ibz_div(*primitive_x + i, &r, *primitive_x + i, content);
+    if (!quat_lattice_contains(primitive_x, order, x)) {
+        ibz_set(content, 0);
+        return 0;
     }
-    ibz_finalize(&r);
+    ibz_vec_4_content(content, primitive_x);
+    if (ibz_is_zero(content) ||
+        !ibz_vec_4_scalar_div(primitive_x, content, primitive_x))
+        return 0;
+    return 1;
 }
 
 void

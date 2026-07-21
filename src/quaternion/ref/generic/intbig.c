@@ -1,14 +1,13 @@
 /*
  * Fixed-precision integer arithmetic implementation
  * Using 2's complement representation for signed integers
- * Supports NIST-I (110), NIST-III (168), NIST-V (222) security levels
+ * Uses the per-variant limb budgets selected in intbig.h.
  */
 
 #include "intbig.h"
-
-#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
 #include <stdlib.h>
 
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
 static void
 ibz_overflow_abort(const char *operation)
 {
@@ -19,6 +18,20 @@ ibz_overflow_abort(const char *operation)
     abort();
 }
 #endif
+
+static void
+ibz_division_by_zero_abort(const char *operation)
+{
+    fprintf(stderr, "[INTBIG] %s by zero\n", operation);
+    abort();
+}
+
+static void
+ibz_invalid_argument_abort(const char *operation)
+{
+    fprintf(stderr, "[INTBIG] invalid argument: %s\n", operation);
+    abort();
+}
 
 const uint64_t ibz_const_zero[IBZ_LIMBS] = { 0 };
 const uint64_t ibz_const_one[IBZ_LIMBS] = { 1 };
@@ -176,6 +189,168 @@ ibz_neg_raw(ibz_t *neg, const ibz_t *a)
     }
 }
 
+/*
+ * Several internal algorithms need an unsigned magnitude.  In particular,
+ * the magnitude of the most-negative signed value is 2^(IBZ_BITS-1), which
+ * has no positive ibz_t representation.  Keep that value as an unsigned limb
+ * array instead of feeding it to the signed comparison/arithmetic helpers.
+ */
+static void
+ibz_abs_unsigned(ibz_t *magnitude, const ibz_t *a)
+{
+    if (ibz_is_negative(a))
+        ibz_neg_raw(magnitude, a);
+    else
+        ibz_copy(magnitude, a);
+}
+
+static int
+ibz_cmp_unsigned(const ibz_t *a, const ibz_t *b)
+{
+    for (int i = IBZ_LIMBS - 1; i >= 0; --i) {
+        if ((*a)[i] > (*b)[i])
+            return 1;
+        if ((*a)[i] < (*b)[i])
+            return -1;
+    }
+    return 0;
+}
+
+static int
+ibz_is_min_value(const ibz_t *a)
+{
+    if ((*a)[IBZ_LIMBS - 1] != (UINT64_C(1) << 63))
+        return 0;
+    for (int i = 0; i < IBZ_LIMBS - 1; ++i)
+        if ((*a)[i] != 0)
+            return 0;
+    return 1;
+}
+
+static int
+ibz_bitsize_unsigned(const ibz_t *a)
+{
+    for (int i = IBZ_LIMBS - 1; i >= 0; --i) {
+        if ((*a)[i] != 0)
+            return i * 64 + (64 - clz64((*a)[i]));
+    }
+    return 0;
+}
+
+static void
+ibz_sub_unsigned(ibz_t *difference, const ibz_t *a, const ibz_t *b)
+{
+    uint64_t borrow = 0;
+    for (int i = 0; i < IBZ_LIMBS; ++i) {
+        uint64_t ai = (*a)[i];
+        uint64_t first = ai - borrow;
+        uint64_t first_borrow = first > ai;
+        uint64_t second = first - (*b)[i];
+        uint64_t second_borrow = second > first;
+        (*difference)[i] = second;
+        borrow = first_borrow | second_borrow;
+    }
+}
+
+static void
+ibz_shift_right_unsigned(ibz_t *result, const ibz_t *a, uint32_t shift)
+{
+    ibz_t input;
+    ibz_copy(&input, a);
+    ibz_init(result);
+
+    if (shift >= IBZ_BITS)
+        return;
+
+    const uint32_t limb_shift = shift / 64;
+    const uint32_t bit_shift = shift % 64;
+    for (uint32_t i = 0; i + limb_shift < IBZ_LIMBS; ++i) {
+        uint64_t value = input[i + limb_shift] >> bit_shift;
+        if (bit_shift != 0 && i + limb_shift + 1 < IBZ_LIMBS)
+            value |= input[i + limb_shift + 1] << (64 - bit_shift);
+        (*result)[i] = value;
+    }
+}
+
+static void
+ibz_shift_left_unsigned(ibz_t *result, const ibz_t *a, uint32_t shift)
+{
+    ibz_t input;
+    ibz_copy(&input, a);
+    ibz_init(result);
+
+    if (shift >= IBZ_BITS)
+        return;
+
+    const uint32_t limb_shift = shift / 64;
+    const uint32_t bit_shift = shift % 64;
+    for (int i = IBZ_LIMBS - 1; i >= (int)limb_shift; --i) {
+        uint64_t value = input[i - limb_shift] << bit_shift;
+        if (bit_shift != 0 && i > (int)limb_shift)
+            value |= input[i - limb_shift - 1] >> (64 - bit_shift);
+        (*result)[i] = value;
+    }
+}
+
+/* Unsigned shift/subtract division.  Starting at the difference in bit
+ * lengths avoids scanning the leading dividend bits that cannot contribute
+ * to the quotient.  Inputs are copied so every output/input aliasing pattern
+ * remains valid.  The caller must provide a nonzero divisor. */
+static void
+ibz_div_unsigned(ibz_t *quotient,
+                 ibz_t *remainder,
+                 const ibz_t *dividend,
+                 const ibz_t *divisor)
+{
+    ibz_t dividend_input, divisor_input, shifted_divisor, q, r;
+    ibz_copy(&dividend_input, dividend);
+    ibz_copy(&divisor_input, divisor);
+    ibz_init(&q);
+    ibz_copy(&r, &dividend_input);
+
+    const int dividend_bits = ibz_bitsize_unsigned(&dividend_input);
+    const int divisor_bits = ibz_bitsize_unsigned(&divisor_input);
+    if (dividend_bits >= divisor_bits) {
+        const int shift = dividend_bits - divisor_bits;
+        ibz_shift_left_unsigned(&shifted_divisor, &divisor_input, (uint32_t)shift);
+        for (int bit = shift; bit >= 0; --bit) {
+            if (ibz_cmp_unsigned(&r, &shifted_divisor) >= 0) {
+                ibz_sub_unsigned(&r, &r, &shifted_divisor);
+                q[bit / 64] |= UINT64_C(1) << (bit % 64);
+            }
+            if (bit != 0)
+                ibz_shift_right_unsigned(&shifted_divisor, &shifted_divisor, 1);
+        }
+    }
+
+    if (quotient)
+        ibz_copy(quotient, &q);
+    if (remainder)
+        ibz_copy(remainder, &r);
+}
+
+static uint32_t
+ibz_div_unsigned_small(ibz_t *quotient, const ibz_t *dividend, uint32_t divisor)
+{
+    ibz_t q;
+    uint64_t remainder = 0;
+    ibz_init(&q);
+
+    for (int i = IBZ_LIMBS - 1; i >= 0; --i) {
+        uint64_t hi, lo;
+        /* remainder < divisor <= UINT32_MAX, so each shifted half fits u64. */
+        hi = (remainder << 32) | ((*dividend)[i] >> 32);
+        q[i] = (hi / divisor) << 32;
+        remainder = hi % divisor;
+        lo = (remainder << 32) | ((*dividend)[i] & UINT64_C(0xffffffff));
+        q[i] |= lo / divisor;
+        remainder = lo % divisor;
+    }
+
+    ibz_copy(quotient, &q);
+    return (uint32_t)remainder;
+}
+
 // Negation (2's complement)
 void
 ibz_neg(ibz_t *neg, const ibz_t *a)
@@ -196,11 +371,10 @@ ibz_neg(ibz_t *neg, const ibz_t *a)
 void
 ibz_abs(ibz_t *abs, const ibz_t *a)
 {
-    if (ibz_is_negative(a)) {
-        ibz_neg(abs, a);
-    } else {
-        ibz_copy(abs, a);
-    }
+    /* The magnitude of INTBIG_MIN is not representable as a positive ibz_t.
+     * Preserve its magnitude bit pattern (and therefore INTBIG_MIN itself),
+     * just as fixed-width two's-complement absolute-value instructions do. */
+    ibz_abs_unsigned(abs, a);
 }
 
 // Addition
@@ -409,7 +583,9 @@ ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b)
     while (a_size > 1 && aa[a_size - 1] == 0) a_size--;
     while (b_size > 1 && bb[b_size - 1] == 0) b_size--;
 
-    static uint64_t temp_result[2 * IBZ_LIMBS];
+    /* Per-call storage is required: a static buffer makes concurrent calls
+     * race and corrupt otherwise independent multiplications. */
+    uint64_t temp_result[2 * IBZ_LIMBS];
     memset(temp_result, 0, sizeof(temp_result));
 
     for (int i = 0; i < a_size; i++) {
@@ -569,36 +745,16 @@ ibz_mul_2exp(ibz_t *result, const ibz_t *a, size_t shift)
 void
 ibz_div_2exp(ibz_t *quotient, const ibz_t *a, uint32_t exp)
 {
-    if (exp >= IBZ_BITS) {
-        if (ibz_is_negative(a)) {
-            memset(*quotient, 0xFF, sizeof(ibz_t));
-        } else {
-            ibz_init(quotient);
-        }
-        return;
-    }
+    ibz_t magnitude, shifted;
+    const int negative = ibz_is_negative(a);
 
-    int limb_shift = exp / 64;
-    int bit_shift = exp % 64;
-
-    if (bit_shift == 0) {
-        for (int i = 0; i < IBZ_LIMBS - limb_shift; i++) {
-            (*quotient)[i] = (*a)[i + limb_shift];
-        }
-        uint64_t sign = ibz_is_negative(a) ? UINT64_MAX : 0;
-        for (int i = IBZ_LIMBS - limb_shift; i < IBZ_LIMBS; i++) {
-            (*quotient)[i] = sign;
-        }
-    } else {
-        for (int i = 0; i < IBZ_LIMBS - limb_shift - 1; i++) {
-            (*quotient)[i] = ((*a)[i + limb_shift] >> bit_shift) | ((*a)[i + limb_shift + 1] << (64 - bit_shift));
-        }
-        uint64_t sign = ibz_is_negative(a) ? UINT64_MAX : 0;
-        (*quotient)[IBZ_LIMBS - limb_shift - 1] = ((*a)[IBZ_LIMBS - 1] >> bit_shift) | (sign << (64 - bit_shift));
-        for (int i = IBZ_LIMBS - limb_shift; i < IBZ_LIMBS; i++) {
-            (*quotient)[i] = sign;
-        }
-    }
+    /* Match truncating integer division, not an arithmetic right shift:
+     * -3 / 2 is -1 and every finite value divided by 2^IBZ_BITS is zero. */
+    ibz_abs_unsigned(&magnitude, a);
+    ibz_shift_right_unsigned(&shifted, &magnitude, exp);
+    if (negative && !ibz_is_zero(&shifted))
+        ibz_neg_raw(&shifted, &shifted);
+    ibz_copy(quotient, &shifted);
 }
 
 // Comparison
@@ -720,12 +876,14 @@ ibz_convert_to_str(const ibz_t *i, char *str, int base)
     if (!str || (base != 10 && base != 16))
         return 0;
 
-    ibz_t abs_i, base_ibz, q, r;
-    ibz_abs(&abs_i, i);
-    ibz_set(&base_ibz, base);
+    ibz_t magnitude, q;
+    ibz_abs_unsigned(&magnitude, i);
 
-    char temp[4096];
-    int pos = 0;
+    /* Base 10 is the longest supported representation and always uses fewer
+     * than IBZ_BITS digits.  Unlike the former fixed 4096-byte buffer, this
+     * remains correct for every configured IBZ_LIMBS value. */
+    char temp[IBZ_BITS + 1];
+    size_t pos = 0;
 
     if (ibz_is_zero(i)) {
         str[0] = '0';
@@ -733,14 +891,10 @@ ibz_convert_to_str(const ibz_t *i, char *str, int base)
         return 1;
     }
 
-    ibz_copy(&q, &abs_i);
+    ibz_copy(&q, &magnitude);
     while (!ibz_is_zero(&q)) {
         ibz_t q_next;
-        ibz_div(&q_next, &r, &q, &base_ibz);   // q_next = q / base, r = q % base
-
-        // defense in case remainder >= base or other anomalous value
-        uint64_t limb0 = r[0];
-        int digit = (int)(limb0 % (uint64_t)base);
+        int digit = (int)ibz_div_unsigned_small(&q_next, &q, (uint32_t)base);
 
         temp[pos++] = (digit < 10)
                           ? ('0' + digit)
@@ -749,16 +903,12 @@ ibz_convert_to_str(const ibz_t *i, char *str, int base)
         ibz_copy(&q, &q_next);
     }
 
-    while (pos > 1 && temp[pos - 1] == '0') {
-        pos--;
-    }
-
-    int offset = 0;
+    size_t offset = 0;
     if (ibz_is_negative(i)) {
         str[offset++] = '-';
     }
 
-    for (int ind = 0; ind < pos; ind++) {
+    for (size_t ind = 0; ind < pos; ind++) {
         str[offset + ind] = temp[pos - 1 - ind];
     }
     str[offset + pos] = '\0';
@@ -796,8 +946,19 @@ ibz_set_from_str(ibz_t *i, const char *str, int base)
         pos = 1;
     }
 
-    ibz_t base_ibz, digit_ibz;
-    ibz_set(&base_ibz, base);
+    if (str[pos] == '\0')
+        return 0;
+
+    ibz_t magnitude, limit;
+    ibz_init(&magnitude);
+    if (is_negative) {
+        ibz_init(&limit);
+        limit[IBZ_LIMBS - 1] = UINT64_C(1) << 63;
+    } else {
+        for (int limb = 0; limb < IBZ_LIMBS; ++limb)
+            limit[limb] = UINT64_MAX;
+        limit[IBZ_LIMBS - 1] >>= 1;
+    }
 
     while (str[pos] != '\0') {
         char c = str[pos];
@@ -817,17 +978,33 @@ ibz_set_from_str(ibz_t *i, const char *str, int base)
             return 0; // Invalid digit for base
         }
 
-        // i = i * base + digit
-        ibz_mul(i, i, &base_ibz);
-        ibz_set(&digit_ibz, digit);
-        ibz_add(i, i, &digit_ibz);
+        /* magnitude = magnitude * base + digit, with an explicit unsigned
+         * overflow check so parsing never wraps into a different value. */
+        uint64_t carry = (uint64_t)digit;
+        for (int limb = 0; limb < IBZ_LIMBS; ++limb) {
+            uint64_t hi, lo;
+            mul64_128(magnitude[limb], (uint64_t)base, &hi, &lo);
+            uint64_t sum = lo + carry;
+            uint64_t add_carry = sum < lo;
+            magnitude[limb] = sum;
+            if (hi > UINT64_MAX - add_carry) {
+                ibz_init(i);
+                return 0;
+            }
+            carry = hi + add_carry;
+        }
+        if (carry != 0 || ibz_cmp_unsigned(&magnitude, &limit) > 0) {
+            ibz_init(i);
+            return 0;
+        }
 
         pos++;
     }
 
-    if (is_negative) {
-        ibz_neg(i, i);
-    }
+    if (is_negative && !ibz_is_zero(&magnitude))
+        ibz_neg_raw(i, &magnitude);
+    else
+        ibz_copy(i, &magnitude);
 
     return 1;
 }
@@ -842,12 +1019,31 @@ ibz_get(const ibz_t *i)
 int
 ibz_rand_interval(ibz_t *rand, const ibz_t *a, const ibz_t *b)
 {
-    ibz_t range;
-    ibz_sub(&range, b, a);
-
-    if (ibz_cmp_int32(&range, 0) <= 0) {
+    const int order = ibz_cmp(a, b);
+    if (order > 0) {
+        ibz_init(rand);
+        return 0;
+    }
+    if (order == 0) {
         ibz_copy(rand, a);
         return 1;
+    }
+
+    ibz_t range;
+    if (ibz_is_negative(a) && !ibz_is_negative(b)) {
+        ibz_t a_magnitude, signed_max, room;
+        ibz_abs_unsigned(&a_magnitude, a);
+        for (int limb = 0; limb < IBZ_LIMBS; ++limb)
+            signed_max[limb] = UINT64_MAX;
+        signed_max[IBZ_LIMBS - 1] >>= 1;
+        ibz_sub_unsigned(&room, &signed_max, b);
+        if (ibz_cmp_unsigned(&a_magnitude, &room) > 0) {
+            ibz_init(rand);
+            return 0;
+        }
+        ibz_add(&range, b, &a_magnitude);
+    } else {
+        ibz_sub(&range, b, a);
     }
 
     int len_bits = ibz_bitsize(&range);
@@ -858,11 +1054,18 @@ ibz_rand_interval(ibz_t *rand, const ibz_t *a, const ibz_t *b)
 
     // Rejection sampling
     for (int tries = 0; tries < 1000; tries++) {
+        unsigned char bytes[IBZ_LIMBS * sizeof(uint64_t)];
         ibz_init(rand);
 
-        if (randombytes((unsigned char *)(*rand), len_bytes) != 0) {
+        if (randombytes(bytes, (unsigned long long)len_bytes) != 0) {
             return 0;
         }
+
+        /* Decode the entropy explicitly as a little-endian unsigned integer.
+         * Casting rand to bytes made the partial most-significant limb and its
+         * mask host-endian-dependent. */
+        for (int byte = 0; byte < len_bytes; ++byte)
+            (*rand)[byte / 8] |= (uint64_t)bytes[byte] << (8 * (byte % 8));
 
         if (len_limbs > 0 && len_limbs <= IBZ_LIMBS) {
             (*rand)[len_limbs - 1] &= mask;
@@ -891,6 +1094,10 @@ ibz_rand_interval_i(ibz_t *rand, int32_t a, int32_t b)
 int
 ibz_rand_interval_minm_m(ibz_t *rand, int32_t m)
 {
+    if (m < 0) {
+        ibz_init(rand);
+        return 0;
+    }
     ibz_t m_big, neg_m;
     ibz_set(&m_big, m);
     ibz_neg(&neg_m, &m_big);
@@ -900,6 +1107,10 @@ ibz_rand_interval_minm_m(ibz_t *rand, int32_t m)
 int
 ibz_rand_interval_bits(ibz_t *rand, uint32_t m)
 {
+    if (m >= IBZ_BITS - 1) {
+        ibz_init(rand);
+        return 0;
+    }
     ibz_t max_val, min_val;
     ibz_set(&max_val, 1);
     ibz_mul_2exp(&max_val, &max_val, m);
@@ -920,45 +1131,29 @@ ibz_cmp_int32(const ibz_t *x, int32_t y)
 int
 ibz_bitsize(const ibz_t *a)
 {
-    // Handle negative numbers by checking absolute value
-    if (ibz_is_negative(a)) {
-        ibz_t abs_a;
-        ibz_neg(&abs_a, a);
-        for (int i = IBZ_LIMBS - 1; i >= 0; i--) {
-            if (abs_a[i] != 0) {
-                return i * 64 + (64 - clz64(abs_a[i]));
-            }
-        }
-        return 0;
-    }
-
-    // Positive numbers
-    for (int i = IBZ_LIMBS - 1; i >= 0; i--) {
-        if ((*a)[i] != 0) {
-            return i * 64 + (64 - clz64((*a)[i]));
-        }
-    }
-    return 0;
+    ibz_t magnitude;
+    ibz_abs_unsigned(&magnitude, a);
+    return ibz_bitsize_unsigned(&magnitude);
 }
 
 // Get size in base
 size_t
 ibz_size_in_base(const ibz_t *a, int base)
 {
+    if (base != 10 && base != 16)
+        return 0;
     if (ibz_is_zero(a)) {
         return 1;
     }
 
-    ibz_t abs_a, temp, base_ibz;
-    ibz_abs(&abs_a, a);
-    ibz_copy(&temp, &abs_a);
-    ibz_set(&base_ibz, base);
+    ibz_t temp;
+    ibz_abs_unsigned(&temp, a);
 
     size_t count = 0;
 
     while (!ibz_is_zero(&temp)) {
-        ibz_t q, r;
-        ibz_div(&q, &r, &temp, &base_ibz);
+        ibz_t q;
+        (void)ibz_div_unsigned_small(&q, &temp, (uint32_t)base);
         ibz_copy(&temp, &q);
         count++;
     }
@@ -966,26 +1161,43 @@ ibz_size_in_base(const ibz_t *a, int base)
     return count > 0 ? count : 1;
 }
 
-// Convert to digit array
+size_t
+ibz_digits_required(const ibz_t *a)
+{
+    ibz_t magnitude;
+    ibz_abs_unsigned(&magnitude, a);
+    for (int i = IBZ_LIMBS - 1; i >= 0; --i)
+        if (magnitude[i] != 0)
+            return (size_t)i + 1;
+    return 1;
+}
+
+int
+ibz_to_digits_checked(digit_t *target, size_t target_len, const ibz_t *a)
+{
+    if (target == NULL || target_len == 0 ||
+        target_len > SIZE_MAX / sizeof(*target))
+        return 0;
+
+    ibz_t magnitude;
+    ibz_abs_unsigned(&magnitude, a);
+    const size_t required = ibz_digits_required(a);
+    memset(target, 0, target_len * sizeof(*target));
+    if (required > target_len)
+        return 0;
+
+    memcpy(target, magnitude, required * sizeof(*target));
+    return 1;
+}
+
+// Convert the unsigned magnitude to a digit array.  The legacy entry point
+// requires at least ibz_digits_required(a) output elements; new code should
+// use ibz_to_digits_checked when the destination is externally sized.
 void
 ibz_to_digits(digit_t *target, const ibz_t *a)
 {
-    int actual_limbs = IBZ_LIMBS;
-    for (int i = IBZ_LIMBS - 1; i >= 0; i--) {
-        if ((*a)[i] != 0) {
-            actual_limbs = i + 1;
-            break;
-        }
-    }
-
-    if (actual_limbs == 0 || ibz_is_zero(a)) {
-        target[0] = 0;
-        return;
-    }
-
-    for (int i = 0; i < actual_limbs; i++) {
-        target[i] = (*a)[i];
-    }
+    const size_t required = ibz_digits_required(a);
+    (void)ibz_to_digits_checked(target, required, a);
 }
 
 // Copy from digit array
@@ -1074,57 +1286,35 @@ ibz_two_adic(ibz_t *pow)
 void
 ibz_div(ibz_t *quotient, ibz_t *remainder, const ibz_t *a, const ibz_t *b)
 {
-    ibz_t q, r;
-    ibz_t dividend, divisor;
+    ibz_t q, r, dividend, divisor;
+    ibz_t a_input, b_input;
 
-    if (ibz_is_zero(b)) {
-        if (quotient)  ibz_init(quotient);
-        if (remainder) ibz_init(remainder);
-        return;
-    }
+    /* Keep both inputs intact until all output writes.  This also covers
+     * quotient/remainder aliasing either input. */
+    ibz_copy(&a_input, a);
+    ibz_copy(&b_input, b);
 
-    int a_neg   = ibz_is_negative(a);
-    int b_neg   = ibz_is_negative(b);
+    if (ibz_is_zero(&b_input))
+        ibz_division_by_zero_abort("division");
+
+    int a_neg   = ibz_is_negative(&a_input);
+    int b_neg   = ibz_is_negative(&b_input);
     int quot_neg = (a_neg != b_neg);
 
-    ibz_abs(&dividend, a);
-    ibz_abs(&divisor,  b);
+    ibz_abs_unsigned(&dividend, &a_input);
+    ibz_abs_unsigned(&divisor, &b_input);
+    ibz_div_unsigned(&q, &r, &dividend, &divisor);
 
-    // |a| < |b|: quotient=0, remainder=a unchanged
-    if (ibz_cmp(&dividend, &divisor) < 0) {
-        if (quotient)  ibz_init(quotient);
-        if (remainder) ibz_copy(remainder, a);
-        return;
-    }
+    if (quot_neg && !ibz_is_zero(&q))
+        ibz_neg_raw(&q, &q);
+    if (a_neg && !ibz_is_zero(&r))
+        ibz_neg_raw(&r, &r);
 
-    ibz_init(&q);
-    ibz_copy(&r, &dividend);
-
-    int divisor_bits  = ibz_bitsize(&divisor);
-    int dividend_bits = ibz_bitsize(&dividend);
-
-    int shift = dividend_bits - divisor_bits;
-    ibz_t shifted_divisor;
-    ibz_mul_2exp(&shifted_divisor, &divisor, shift);
-
-    // main division loop
-    for (int i = shift; i >= 0; i--) {
-        if (ibz_cmp(&r, &shifted_divisor) >= 0) {
-            ibz_sub(&r, &r, &shifted_divisor);
-            q[i / 64] |= (1ULL << (i % 64));
-        }
-        if (i > 0) {
-            ibz_div_2exp(&shifted_divisor, &shifted_divisor, 1);
-        }
-    }
-
-    // sign adjustment
-    if (quot_neg && !ibz_is_zero(&q)) {
-        ibz_neg(&q, &q);
-    }
-    if (a_neg && !ibz_is_zero(&r)) {
-        ibz_neg(&r, &r);
-    }
+#if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
+    /* INTBIG_MIN / -1 is the sole division result outside the signed range. */
+    if (!quot_neg && ibz_is_negative(&q))
+        ibz_overflow_abort("division");
+#endif
 
     // emit the result only at the end (alias-safe)
     if (quotient)  ibz_copy(quotient,  &q);
@@ -1136,21 +1326,24 @@ ibz_div(ibz_t *quotient, ibz_t *remainder, const ibz_t *a, const ibz_t *b)
 void
 ibz_div_floor(ibz_t *q, ibz_t *r, const ibz_t *n, const ibz_t *d)
 {
-    ibz_div(q, r, n, d);
+    ibz_t n_input, d_input, q_tmp, r_tmp, one;
+    ibz_copy(&n_input, n);
+    ibz_copy(&d_input, d);
+    ibz_div(&q_tmp, &r_tmp, &n_input, &d_input);
 
-    if (ibz_is_negative(r) && !ibz_is_zero(r)) {
-        if (ibz_is_negative(d)) {
-            ibz_t one;
-            ibz_set(&one, 1);
-            ibz_add(q, q, &one);
-            ibz_sub(r, r, d);
-        } else {
-            ibz_t one;
-            ibz_set(&one, 1);
-            ibz_sub(q, q, &one);
-            ibz_add(r, r, d);
-        }
+    /* Truncating division differs from floor exactly when n/d is negative
+     * and non-integral.  The floor remainder then has the divisor's sign. */
+    if (!ibz_is_zero(&r_tmp) &&
+        ibz_is_negative(&n_input) != ibz_is_negative(&d_input)) {
+        ibz_set(&one, 1);
+        ibz_sub(&q_tmp, &q_tmp, &one);
+        ibz_add(&r_tmp, &r_tmp, &d_input);
     }
+
+    if (q)
+        ibz_copy(q, &q_tmp);
+    if (r)
+        ibz_copy(r, &r_tmp);
 }
 
 // Modulo
@@ -1162,6 +1355,75 @@ ibz_mod(ibz_t *r, const ibz_t *a, const ibz_t *b)
     ibz_div_floor(&q, r, a, b);
 }
 
+/* Reduce a signed value modulo a positive unsigned magnitude.  The modulus
+ * may be 2^(IBZ_BITS-1), which is not a positive signed ibz_t. */
+static void
+ibz_mod_positive_magnitude(ibz_t *r, const ibz_t *a, const ibz_t *modulus)
+{
+    ibz_t magnitude, reduced;
+    ibz_abs_unsigned(&magnitude, a);
+    ibz_div_unsigned(NULL, &reduced, &magnitude, modulus);
+    if (ibz_is_negative(a) && !ibz_is_zero(&reduced))
+        ibz_sub_unsigned(&reduced, modulus, &reduced);
+    ibz_copy(r, &reduced);
+}
+
+/* a,b are in [0, modulus); modulus is an unsigned positive magnitude. */
+static void
+ibz_add_mod_positive(ibz_t *sum,
+                     const ibz_t *a,
+                     const ibz_t *b,
+                     const ibz_t *modulus)
+{
+    ibz_t distance;
+    ibz_sub_unsigned(&distance, modulus, b);
+    if (ibz_cmp_unsigned(a, &distance) >= 0)
+        ibz_sub_unsigned(sum, a, &distance);
+    else
+        ibz_add(sum, a, b);
+}
+
+/* Overflow-free modular multiplication for fixed integers.
+ *
+ * Protocol-sized operands normally have enough headroom for the ordinary
+ * product.  Keep that common path on the much faster limb multiplication and
+ * division routines.  Only use bit-serial add-and-double when the unreduced
+ * product may exceed the signed ibz_t capacity (the boundary case exercised
+ * by the fixed-precision regression tests). */
+static void
+ibz_mul_mod_positive(ibz_t *product,
+                     const ibz_t *a,
+                     const ibz_t *b,
+                     const ibz_t *modulus)
+{
+    const int a_bits = ibz_bitsize_unsigned(a);
+    const int b_bits = ibz_bitsize_unsigned(b);
+    if (a_bits == 0 || b_bits == 0) {
+        ibz_init(product);
+        return;
+    }
+
+    if (a_bits <= (IBZ_BITS - 1) - b_bits) {
+        ibz_t unreduced;
+        ibz_mul(&unreduced, a, b);
+        ibz_div_unsigned(NULL, product, &unreduced, modulus);
+        return;
+    }
+
+    ibz_t result, addend;
+    ibz_init(&result);
+    ibz_copy(&addend, a);
+
+    const int bits = ibz_bitsize_unsigned(b);
+    for (int bit = 0; bit < bits; ++bit) {
+        if ((((*b)[bit / 64] >> (bit % 64)) & UINT64_C(1)) != 0)
+            ibz_add_mod_positive(&result, &result, &addend, modulus);
+        if (bit + 1 < bits)
+            ibz_add_mod_positive(&addend, &addend, &addend, modulus);
+    }
+    ibz_copy(product, &result);
+}
+
 // Power
 void
 ibz_pow(ibz_t *pow, const ibz_t *x, uint32_t e)
@@ -1171,11 +1433,11 @@ ibz_pow(ibz_t *pow, const ibz_t *x, uint32_t e)
     ibz_copy(&base, x);
 
     while (e > 0) {
-        if (e & 1) {
+        if (e & 1)
             ibz_mul(&result, &result, &base);
-        }
-        ibz_mul(&base, &base, &base);
         e >>= 1;
+        if (e != 0)
+            ibz_mul(&base, &base, &base);
     }
 
     ibz_copy(pow, &result);
@@ -1186,17 +1448,27 @@ unsigned long
 ibz_mod_ui(const ibz_t *n, unsigned long d)
 {
     if (d == 0)
-        return 0;
+        ibz_division_by_zero_abort("modulo");
 
-    ibz_t divisor, remainder, quotient;
-    ibz_set_u64(&divisor, d);
-    ibz_div(&quotient, &remainder, n, &divisor);
+    ibz_t magnitude, quotient;
+    ibz_abs_unsigned(&magnitude, n);
 
-    if (ibz_is_negative(&remainder)) {
-        ibz_t d_ibz;
-        ibz_set_u64(&d_ibz, d);
-        ibz_add(&remainder, &remainder, &d_ibz);
+    /* This is the path used by primality trial division.  Dividing two
+     * 32-bit halves per limb is linear in the active fixed precision and is
+     * substantially cheaper than general shift/subtract division. */
+    if (d <= UINT32_MAX) {
+        unsigned long remainder =
+            (unsigned long)ibz_div_unsigned_small(&quotient, &magnitude, (uint32_t)d);
+        if (ibz_is_negative(n) && remainder != 0)
+            remainder = d - remainder;
+        return remainder;
     }
+
+    ibz_t divisor, remainder;
+    ibz_set_u64(&divisor, d);
+    ibz_div_unsigned(NULL, &remainder, &magnitude, &divisor);
+    if (ibz_is_negative(n) && !ibz_is_zero(&remainder))
+        ibz_sub_unsigned(&remainder, &divisor, &remainder);
 
     return (unsigned long)remainder[0];
 }
@@ -1205,6 +1477,8 @@ ibz_mod_ui(const ibz_t *n, unsigned long d)
 int
 ibz_probab_prime(const ibz_t *n, int reps)
 {
+    if (reps <= 0)
+        return 0;
     if (ibz_cmp_int32(n, 2) == 0)
         return 1;
     if (ibz_cmp_int32(n, 3) == 0)
@@ -1213,6 +1487,25 @@ ibz_probab_prime(const ibz_t *n, int reps)
         return 0;
     if (ibz_cmp_int32(n, 1) <= 0)
         return 0;
+
+    /* Match the fixed-precision implementation's cheap composite filter.
+     * Most candidates produced by quat_represent_integer have a small prime
+     * factor; rejecting them here avoids entering a full Miller--Rabin
+     * modular exponentiation. */
+    static const unsigned long small_primes[50] = {
+          3,   5,   7,  11,  13,  17,  19,  23,  29,  31,
+         37,  41,  43,  47,  53,  59,  61,  67,  71,  73,
+         79,  83,  89,  97, 101, 103, 107, 109, 113, 127,
+        131, 137, 139, 149, 151, 157, 163, 167, 173, 179,
+        181, 191, 193, 197, 199, 211, 223, 227, 229, 233
+    };
+    for (size_t i = 0; i < sizeof(small_primes) / sizeof(small_primes[0]); ++i) {
+        const unsigned long prime = small_primes[i];
+        if (ibz_cmp_int32(n, (int32_t)prime) == 0)
+            return 1;
+        if (ibz_mod_ui(n, prime) == 0)
+            return 0;
+    }
 
     ibz_t n_minus_1, d, a, x, temp;
     ibz_sub(&n_minus_1, n, (const ibz_t *)&ibz_const_one);
@@ -1226,7 +1519,8 @@ ibz_probab_prime(const ibz_t *n, int reps)
         ibz_t two, n_minus_2;
         ibz_set(&two, 2);
         ibz_sub(&n_minus_2, n, &two);
-        ibz_rand_interval(&a, &two, &n_minus_2);
+        if (!ibz_rand_interval(&a, &two, &n_minus_2))
+            return 0;
 
         // x = a^d mod n
         ibz_pow_mod(&x, &a, &d, n);
@@ -1238,8 +1532,7 @@ ibz_probab_prime(const ibz_t *n, int reps)
         ibz_copy(&temp, &d);
         int composite = 1;
         while (ibz_cmp(&temp, &n_minus_1) < 0) {
-            ibz_mul(&x, &x, &x);
-            ibz_mod(&x, &x, n);
+            ibz_mul_mod_positive(&x, &x, &x, n);
 
             if (ibz_is_one(&x)) {
                 return 0; // Composite
@@ -1264,21 +1557,23 @@ ibz_probab_prime(const ibz_t *n, int reps)
 void
 ibz_pow_mod(ibz_t *pow, const ibz_t *x, const ibz_t *e, const ibz_t *m)
 {
-    ibz_t result, base, exp, temp;
-    ibz_set(&result, 1);
-    ibz_copy(&base, x);
-    ibz_copy(&exp, e);
+    ibz_t result, base, exp, modulus;
+    ibz_abs_unsigned(&modulus, m);
+    if (ibz_is_zero(&modulus))
+        ibz_division_by_zero_abort("modular exponentiation");
+    if (ibz_is_negative(e))
+        ibz_invalid_argument_abort("negative modular exponent");
 
-    ibz_mod(&base, &base, m);
+    ibz_mod_positive_magnitude(&base, x, &modulus);
+    ibz_copy(&exp, e);
+    ibz_set(&result, 1);
+    ibz_div_unsigned(NULL, &result, &result, &modulus); /* 1 mod m */
 
     while (!ibz_is_zero(&exp)) {
-        if (ibz_is_odd(&exp)) {
-            ibz_mul(&temp, &result, &base);
-            ibz_mod(&result, &temp, m);
-        }
-        ibz_mul(&temp, &base, &base);
-        ibz_mod(&base, &temp, m);
-        ibz_div_2exp(&exp, &exp, 1);
+        if (ibz_is_odd(&exp))
+            ibz_mul_mod_positive(&result, &result, &base, &modulus);
+        ibz_mul_mod_positive(&base, &base, &base, &modulus);
+        ibz_shift_right_unsigned(&exp, &exp, 1);
     }
 
     ibz_copy(pow, &result);
@@ -1289,8 +1584,8 @@ void
 ibz_gcd(ibz_t *gcd, const ibz_t *a, const ibz_t *b)
 {
     ibz_t u, v;
-    ibz_abs(&u, a);
-    ibz_abs(&v, b);
+    ibz_abs_unsigned(&u, a);
+    ibz_abs_unsigned(&v, b);
 
     if (ibz_is_zero(&u)) {
         ibz_copy(gcd, &v);
@@ -1302,22 +1597,22 @@ ibz_gcd(ibz_t *gcd, const ibz_t *a, const ibz_t *b)
     }
 
     int shift = MIN(ibz_two_adic(&u), ibz_two_adic(&v));
-    ibz_div_2exp(&u, &u, shift);
-    ibz_div_2exp(&v, &v, shift);
+    ibz_shift_right_unsigned(&u, &u, (uint32_t)shift);
+    ibz_shift_right_unsigned(&v, &v, (uint32_t)shift);
 
     while (!ibz_is_zero(&u)) {
-        ibz_div_2exp(&u, &u, ibz_two_adic(&u));
-        ibz_div_2exp(&v, &v, ibz_two_adic(&v));
+        ibz_shift_right_unsigned(&u, &u, (uint32_t)ibz_two_adic(&u));
+        ibz_shift_right_unsigned(&v, &v, (uint32_t)ibz_two_adic(&v));
 
-        if (ibz_cmp(&u, &v) > 0) {
+        if (ibz_cmp_unsigned(&u, &v) > 0) {
             ibz_swap(&u, &v);
         }
 
-        ibz_sub(&v, &v, &u);
+        ibz_sub_unsigned(&v, &v, &u);
     }
 
-    // Restore common factors of 2
-    ibz_mul_2exp(&v, &v, shift);
+    // Restore common factors of 2 in the unsigned magnitude domain.
+    ibz_shift_left_unsigned(&v, &v, (uint32_t)shift);
 
     ibz_copy(gcd, &v);
 }
@@ -1328,9 +1623,9 @@ ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y,
 {
     // special case: a == 0
     if (ibz_is_zero(a)) {
-        ibz_abs(gcd, b);
+        ibz_abs_unsigned(gcd, b);
         ibz_set(x, 0);
-        if (ibz_is_negative(b)) {
+        if (ibz_is_negative(b) && !ibz_is_min_value(b)) {
             ibz_set(y, -1);
         } else {
             ibz_set(y, 1);
@@ -1340,8 +1635,8 @@ ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y,
 
     // special case: b == 0
     if (ibz_is_zero(b)) {
-        ibz_abs(gcd, a);
-        if (ibz_is_negative(a)) {
+        ibz_abs_unsigned(gcd, a);
+        if (ibz_is_negative(a) && !ibz_is_min_value(a)) {
             ibz_set(x, -1);
         } else {
             ibz_set(x, 1);
@@ -1393,7 +1688,7 @@ ibz_gcdext(ibz_t *gcd, ibz_t *x, ibz_t *y,
     ibz_copy(y, &y0);
 
     // normalize gcd to positive: if gcd < 0 flip the sign of gcd, x, y
-    if (ibz_is_negative(gcd)) {
+    if (ibz_is_negative(gcd) && !ibz_is_min_value(gcd)) {
         ibz_neg(gcd, gcd);
         ibz_neg(x, x);
         ibz_neg(y, y);
@@ -1547,6 +1842,8 @@ ibz_invmod(ibz_t *inv, const ibz_t *a, const ibz_t *mod)
 int
 ibz_divides(const ibz_t *a, const ibz_t *b)
 {
+    if (ibz_is_zero(b))
+        return 0;
     ibz_t q, r;
     ibz_div(&q, &r, a, b);
     return ibz_is_zero(&r);
@@ -1642,6 +1939,9 @@ ibz_legendre(const ibz_t *a, const ibz_t *p)
 {
     ibz_t a_mod, exp, result, p_minus_1;
 
+    if (ibz_cmp_int32(p, 2) <= 0 || ibz_is_even(p))
+        return 0;
+
     ibz_mod(&a_mod, a, p);
 
     if (ibz_is_zero(&a_mod)) {
@@ -1697,30 +1997,44 @@ ibz_legendre(const ibz_t *a, const ibz_t *p)
 int
 ibz_sqrt_mod_p(ibz_t *sqrt, const ibz_t *a, const ibz_t *p)
 {
+    /* Cornacchia intentionally calls this as sqrt == a.  Preserve both
+     * inputs before clearing the transactional output; otherwise the former
+     * eager ibz_init(sqrt) changed the radicand to zero and made every
+     * Cornacchia attempt fail. */
+    ibz_t a_input, p_input;
+    ibz_copy(&a_input, a);
+    ibz_copy(&p_input, p);
+    const ibz_t *modulus = &p_input;
+
+    ibz_init(sqrt);
+    if (ibz_cmp_int32(modulus, 2) < 0 ||
+        (ibz_cmp_int32(modulus, 2) > 0 && ibz_is_even(modulus)))
+        return 0;
+
     // handle p == 2 (not really used in your setting, but safe)
-    if (ibz_cmp_int32(p, 2) == 0) {
+    if (ibz_cmp_int32(modulus, 2) == 0) {
         ibz_t am;
-        ibz_mod(&am, a, p);
+        ibz_mod(&am, &a_input, modulus);
         ibz_copy(sqrt, &am);
         return 1;
     }
 
     // a := a mod p
     ibz_t n;
-    ibz_mod(&n, a, p);
+    ibz_mod(&n, &a_input, modulus);
     if (ibz_is_zero(&n)) {
         ibz_init(sqrt);
         return 1;
     }
 
     // Check quadratic residue via Legendre
-    if (ibz_legendre(&n, p) != 1) {
+    if (ibz_legendre(&n, modulus) != 1) {
         return 0;
     }
 
     // Factor p-1 = q * 2^s with q odd
     ibz_t pm1, q;
-    ibz_sub(&pm1, p, (const ibz_t *)&ibz_const_one);
+    ibz_sub(&pm1, modulus, (const ibz_t *)&ibz_const_one);
     ibz_copy(&q, &pm1);
 
     int s = 0;
@@ -1734,24 +2048,24 @@ ibz_sqrt_mod_p(ibz_t *sqrt, const ibz_t *a, const ibz_t *p)
     // Find z, a quadratic non-residue mod p
     ibz_t z;
     ibz_set(&z, 2);
-    while (ibz_legendre(&z, p) != -1) {
+    while (ibz_legendre(&z, modulus) != -1) {
         ibz_add(&z, &z, (const ibz_t *)&ibz_const_one);
     }
 
     // c = z^q mod p
     ibz_t c;
-    ibz_pow_mod(&c, &z, &q, p);
+    ibz_pow_mod(&c, &z, &q, modulus);
 
     // x = n^((q+1)/2) mod p
     ibz_t q1, e;
     ibz_add(&q1, &q, (const ibz_t *)&ibz_const_one);
     ibz_div_2exp(&e, &q1, 1);
     ibz_t x;
-    ibz_pow_mod(&x, &n, &e, p);
+    ibz_pow_mod(&x, &n, &e, modulus);
 
     // t = n^q mod p
     ibz_t t;
-    ibz_pow_mod(&t, &n, &q, p);
+    ibz_pow_mod(&t, &n, &q, modulus);
 
     int m = s;
 
@@ -1766,8 +2080,7 @@ ibz_sqrt_mod_p(ibz_t *sqrt, const ibz_t *a, const ibz_t *p)
 
         for (i = 1; i < m; i++) {
             // t2i = t2i^2 mod p
-            ibz_mul(&t2i, &t2i, &t2i);
-            ibz_mod(&t2i, &t2i, p);
+            ibz_mul_mod_positive(&t2i, &t2i, &t2i, modulus);
             if (ibz_is_one(&t2i))
                 break;
         }
@@ -1781,21 +2094,17 @@ ibz_sqrt_mod_p(ibz_t *sqrt, const ibz_t *a, const ibz_t *p)
         ibz_t b;
         ibz_copy(&b, &c);
         for (int j = 0; j < (m - i - 1); j++) {
-            ibz_mul(&b, &b, &b);
-            ibz_mod(&b, &b, p);
+            ibz_mul_mod_positive(&b, &b, &b, modulus);
         }
 
         // x = x*b mod p
-        ibz_mul(&x, &x, &b);
-        ibz_mod(&x, &x, p);
+        ibz_mul_mod_positive(&x, &x, &b, modulus);
 
         // t = t*b^2 mod p
         ibz_t b2;
-        ibz_mul(&b2, &b, &b);
-        ibz_mod(&b2, &b2, p);
+        ibz_mul_mod_positive(&b2, &b, &b, modulus);
 
-        ibz_mul(&t, &t, &b2);
-        ibz_mod(&t, &t, p);
+        ibz_mul_mod_positive(&t, &t, &b2, modulus);
 
         // c = b^2 mod p
         ibz_copy(&c, &b2);

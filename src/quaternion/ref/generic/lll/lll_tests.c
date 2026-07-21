@@ -417,7 +417,7 @@ quat_test_lll_lattice_lll(void)
 
     quat_lattice_hnf(&lat);
 
-    res = res || quat_lattice_lll(&red, &lat, &alg);
+    res = res || !quat_lattice_lll(&red, &lat, &alg);
     // test lll reduced
     quat_lll_set_ibq_parameters(&delta, &eta);
     res = res || !quat_lll_verify(&red, &delta, &eta, &alg);
@@ -495,7 +495,7 @@ quat_test_lll_randomized_lattice_lll(void)
         ibz_set(&q, 1 + (rand_q % 1023));
         quat_alg_init_set(&alg, &q);
         // reduce
-        res = res || quat_lattice_lll(&red, &lat, &alg);
+        res = res || !quat_lattice_lll(&red, &lat, &alg);
         // test lll reduced
         res = res || !quat_lll_verify(&red, &delta, &eta, &alg);
         // test lattice equality
@@ -899,6 +899,44 @@ quat_test_mlll_dependent(void)
     return ret;
 }
 
+static int
+quat_test_mlll_rank3_output(void)
+{
+    int ret = 0;
+    int rank = -1;
+    quat_alg_t alg;
+    ibz_vec_4_t gens[3];
+    ibz_mat_4x4_t basis;
+
+    quat_alg_init_set_ui(&alg, 101);
+    ibz_mat_4x4_init(&basis);
+    for (int i = 0; i < 3; i++) {
+        ibz_vec_4_init(&gens[i]);
+        ibz_set(&gens[i][i], 1);
+    }
+
+    quat_mlll(&basis, &rank, gens, 3, &alg);
+    if (rank != 3) {
+        printf("[mlll_rank3] FAIL: expected rank=3, got rank=%d\n", rank);
+        ret = -1;
+    }
+    for (int column = 0; column < 3; column++) {
+        for (int row = 0; row < 4; row++) {
+            int expected = row == column;
+            if (ibz_cmp_int32(&basis[row][column], expected) != 0) {
+                printf("[mlll_rank3] FAIL: lower-rank output was not retained\n");
+                ret = -1;
+            }
+        }
+    }
+
+    for (int i = 0; i < 3; i++)
+        ibz_vec_4_finalize(&gens[i]);
+    ibz_mat_4x4_finalize(&basis);
+    quat_alg_finalize(&alg);
+    return ret;
+}
+
 int
 quat_test_mlll(void)
 {
@@ -906,6 +944,7 @@ quat_test_mlll(void)
     printf("\nRunning quaternion MLLL (Phase 1) unit tests\n");
     res |= quat_test_mlll_rank4();
     res |= quat_test_mlll_dependent();
+    res |= quat_test_mlll_rank3_output();
     if (res == 0)
         printf("  All MLLL tests PASS\n");
     return res;

@@ -16,8 +16,10 @@ encode_digits(byte_t *enc, const digit_t *x, size_t nbytes)
     const size_t ndigits = nbytes / sizeof(digit_t);
     const size_t rem = nbytes % sizeof(digit_t);
 
-    for (size_t i = 0; i < ndigits; i++)
-        ((digit_t *)enc)[i] = BSWAP_DIGIT(x[i]);
+    for (size_t i = 0; i < ndigits; i++) {
+        digit_t word = BSWAP_DIGIT(x[i]);
+        memcpy(enc + i * sizeof(digit_t), &word, sizeof(word));
+    }
     if (rem) {
         digit_t ld = BSWAP_DIGIT(x[ndigits]);
         memcpy(enc + ndigits * sizeof(digit_t), (byte_t *)&ld, rem);
@@ -52,7 +54,9 @@ fp2_to_bytes(byte_t *enc, const fp2_t *x)
 static const byte_t *
 fp2_from_bytes(fp2_t *x, const byte_t *enc)
 {
-    fp2_decode(x, enc);
+    if (!fp2_decode(x, enc)) {
+        return NULL;
+    }
     return enc + FP2_ENCODED_BYTES;
 }
 
@@ -82,6 +86,10 @@ static const byte_t *
 proj_from_bytes(fp2_t *x, fp2_t *z, const byte_t *enc)
 {
     enc = fp2_from_bytes(x, enc);
+    if (enc == NULL) {
+        fp2_set_zero(z);
+        return NULL;
+    }
     fp2_set_one(z);
     return enc;
 }
@@ -150,6 +158,10 @@ public_key_from_bytes(public_key_t *pk, const byte_t *enc)
     const byte_t *const start = enc;
 #endif
     enc = ec_curve_from_bytes(&pk->curve, enc);
+    if (enc == NULL) {
+        pk->hint_pk = 0;
+        return NULL;
+    }
     pk->hint_pk = *enc++;
     assert(enc - start == PUBLICKEY_BYTES);
     return enc;
@@ -187,14 +199,18 @@ signature_to_bytes(byte_t *enc, const signature_t *sig)
     assert(enc - start == SIGNATURE_BYTES);
 }
 
-void
+int
 signature_from_bytes(signature_t *sig, const byte_t *enc)
 {
 #ifndef NDEBUG
     const byte_t *const start = enc;
 #endif
 
+    memset(sig, 0, sizeof(*sig));
     enc = fp2_from_bytes(&sig->E_aux_A, enc);
+    if (enc == NULL) {
+        return 0;
+    }
 
     sig->backtracking = *enc++;
     sig->two_resp_length = *enc++;
@@ -217,4 +233,5 @@ signature_from_bytes(signature_t *sig, const byte_t *enc)
     sig->hint_chall = *enc++;
 
     assert(enc - start == SIGNATURE_BYTES);
+    return 1;
 }

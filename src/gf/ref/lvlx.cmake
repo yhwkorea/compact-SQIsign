@@ -10,4 +10,6 @@ target_compile_options(${LIB_GF_${SVARIANT_UPPER}} PRIVATE ${C_OPT_FLAGS})
 target_link_libraries(${LIB_GF_${SVARIANT_UPPER}} ${LIB_MP})
 target_compile_definitions(${LIB_GF_${SVARIANT_UPPER}} PUBLIC SQISIGN_VARIANT=${SVARIANT_LOWER})
 
-add_subdirectory(test)
+if(ENABLE_TESTS)
+    add_subdirectory(test)
+endif()

@@ -378,7 +378,7 @@ void quat_alg_mul(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg
  * @param x Algebra element whose norm is computed
  * @param alg The quaternion algebra
  */
-void quat_alg_norm(ibz_t *res_num, ibz_t *res_denom, const quat_alg_elem_t *x, const quat_alg_t *alg);
+int quat_alg_norm(ibz_t *res_num, ibz_t *res_denom, const quat_alg_elem_t *x, const quat_alg_t *alg);
 
 /** @brief Normalize representation of alg_elem x
  *
@@ -410,7 +410,7 @@ void quat_alg_conj(quat_alg_elem_t *conj, const quat_alg_elem_t *x);
  * @param order order of `alg`
  * @param x element of order, must be in `order`
  */
-void quat_alg_make_primitive(ibz_vec_4_t *primitive_x,
+int quat_alg_make_primitive(ibz_vec_4_t *primitive_x,
                              ibz_t *content,
                              const quat_alg_elem_t *x,
                              const quat_lattice_t *order);
@@ -472,7 +472,7 @@ void quat_lattice_conjugate_without_hnf(quat_lattice_t *conj, const quat_lattice
  * @param elem Algebra element
  * @param alg The quaternion algebra
  */
-void quat_lattice_alg_elem_mul(quat_lattice_t *prod,
+int quat_lattice_alg_elem_mul(quat_lattice_t *prod,
                                const quat_lattice_t *lat,
                                const quat_alg_elem_t *elem,
                                const quat_alg_t *alg); // ideal
@@ -540,11 +540,11 @@ int quat_lideal_create_with_norm(quat_left_ideal_t *lideal,
 /* paper Issue 14 (Algorithm RandomIdealGivenPrimeNorm, 04Sampling.tex:38):
  * compute nrd(x) mod N with each ibz_mul transient <= max(2*log2(N), p_bits+log2(N)).
  * Assumes x->denom == 1. Used by sampling to match paper Lemma 4N^2. */
-void quat_alg_norm_mod(ibz_t *res, const quat_alg_elem_t *x, const ibz_t *N, const quat_alg_t *alg);
+int quat_alg_norm_mod(ibz_t *res, const quat_alg_elem_t *x, const ibz_t *N, const quat_alg_t *alg);
 
 /* paper Issue 14: compute (a*b mod N*O_0) coord-by-coord with bounded transients.
  * Output res has denom=1 and coords in [0, N). Assumes a->denom == 1, b->denom == 1. */
-void quat_alg_mul_mod(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg_elem_t *b, const ibz_t *N, const quat_alg_t *alg);
+int quat_alg_mul_mod(quat_alg_elem_t *res, const quat_alg_elem_t *a, const quat_alg_elem_t *b, const ibz_t *N, const quat_alg_t *alg);
 
 /** @}
  */
@@ -630,7 +630,7 @@ int quat_lideal_inter(quat_left_ideal_t *intersection,
  * @param lideal ideal whose basis will be reduced
  * @param alg the quaternion algebra
  */
-void quat_lideal_reduce_basis(ibz_mat_4x4_t *reduced,
+int quat_lideal_reduce_basis(ibz_mat_4x4_t *reduced,
                               ibz_mat_4x4_t *gram,
                               const quat_left_ideal_t *lideal,
                               const quat_alg_t *alg); // replaces lideal_lll
@@ -649,6 +649,7 @@ void quat_lideal_reduce_basis(ibz_mat_4x4_t *reduced,
  * @param lideal1 Ideal at left in the product
  * @param lideal2 Ideal at right in the product
  * @param alg The quaternion algebra
+ * @returns 1 on success, 0 with both outputs unchanged on failure
  */
 int quat_lideal_lideal_mul_reduced(quat_left_ideal_t *prod,
                                    ibz_mat_4x4_t *gram,
@@ -720,7 +721,7 @@ int quat_represent_integer(quat_alg_elem_t *gamma,
  * @param vec Output: Coordinates of el in basis (1,i,(i+j)/2,(1+ij)/2)
  * @param el Imput: An algebra element in O0
  */
-void quat_change_to_O0_basis(ibz_vec_4_t *vec, const quat_alg_elem_t *el);
+int quat_change_to_O0_basis(ibz_vec_4_t *vec, const quat_alg_elem_t *el);
 
 /**
  * @brief Random O0-ideal of given norm

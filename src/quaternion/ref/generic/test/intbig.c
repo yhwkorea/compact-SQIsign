@@ -1,8 +1,78 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <rng.h>
 #include "intbig_internal.h"
+
+#define IBZ_MUL_THREAD_COUNT 8
+#define IBZ_MUL_THREAD_REPS 1000
+
+typedef struct {
+    ibz_t a;
+    ibz_t b;
+    ibz_t expected;
+    int failed;
+} ibz_mul_thread_arg_t;
+
+static void *
+ibz_mul_thread_worker(void *opaque)
+{
+    ibz_mul_thread_arg_t *arg = opaque;
+    ibz_t product;
+    ibz_init(&product);
+    for (int i = 0; i < IBZ_MUL_THREAD_REPS; ++i) {
+        ibz_mul(&product, &arg->a, &arg->b);
+        if (ibz_cmp(&product, &arg->expected) != 0) {
+            arg->failed = 1;
+            break;
+        }
+    }
+    ibz_finalize(&product);
+    return NULL;
+}
+
+static int
+ibz_test_mul_thread_safety(void)
+{
+    pthread_t workers[IBZ_MUL_THREAD_COUNT];
+    ibz_mul_thread_arg_t args[IBZ_MUL_THREAD_COUNT];
+    int created = 0;
+    int res = 0;
+
+    for (int i = 0; i < IBZ_MUL_THREAD_COUNT; ++i) {
+        ibz_init(&args[i].a);
+        ibz_init(&args[i].b);
+        ibz_init(&args[i].expected);
+        args[i].failed = 0;
+        ibz_set(&args[i].a, 1);
+        ibz_mul_2exp(&args[i].a, &args[i].a, (uint32_t)(IBZ_BITS / 4 + i));
+        ibz_add(&args[i].a, &args[i].a, &ibz_const_one);
+        ibz_set(&args[i].b, 1);
+        ibz_mul_2exp(&args[i].b, &args[i].b, (uint32_t)(IBZ_BITS / 5 + 2 * i));
+        ibz_add(&args[i].b, &args[i].b, &ibz_const_three);
+        ibz_mul(&args[i].expected, &args[i].a, &args[i].b);
+    }
+
+    for (; created < IBZ_MUL_THREAD_COUNT; ++created) {
+        if (pthread_create(&workers[created], NULL, ibz_mul_thread_worker, &args[created]) != 0) {
+            res = 1;
+            break;
+        }
+    }
+    for (int i = 0; i < created; ++i)
+        if (pthread_join(workers[i], NULL) != 0 || args[i].failed)
+            res = 1;
+
+    for (int i = 0; i < IBZ_MUL_THREAD_COUNT; ++i) {
+        ibz_finalize(&args[i].expected);
+        ibz_finalize(&args[i].b);
+        ibz_finalize(&args[i].a);
+    }
+    if (res)
+        printf("Quaternion module integer test ibz_test_mul_thread_safety failed\n");
+    return res;
+}
 
 // void ibz_init(ibz_t *x);
 // void ibz_finalize(ibz_t *x);
@@ -179,6 +249,196 @@ ibz_test_add_sub_neg_abs()
     return (res);
 }
 
+static int
+ibz_test_fixed_precision_regressions(void)
+{
+    int res = 0;
+    ibz_t a, b, q, r, check, min_value, max_value, exponent;
+    ibz_init(&a);
+    ibz_init(&b);
+    ibz_init(&q);
+    ibz_init(&r);
+    ibz_init(&check);
+    ibz_init(&min_value);
+    ibz_init(&max_value);
+    ibz_init(&exponent);
+
+    min_value[IBZ_LIMBS - 1] = UINT64_C(1) << 63;
+    for (int i = 0; i < IBZ_LIMBS; ++i)
+        max_value[i] = UINT64_MAX;
+    max_value[IBZ_LIMBS - 1] >>= 1;
+
+    /* Division by 2^k truncates toward zero, including in-place and k >= N. */
+    int section_res = res;
+    ibz_set(&a, -3);
+    ibz_div_2exp(&a, &a, 1);
+    res |= ibz_cmp_int32(&a, -1) != 0;
+    ibz_div_2exp(&a, &min_value, 1);
+    ibz_mul_2exp(&check, &a, 1);
+    res |= ibz_cmp(&check, &min_value) != 0;
+    ibz_div_2exp(&a, &min_value, IBZ_BITS);
+    res |= !ibz_is_zero(&a);
+    ibz_div_2exp(&a, &min_value, IBZ_BITS + 17U);
+    res |= !ibz_is_zero(&a);
+    ibz_set(&a, 7);
+    ibz_init(&b);
+    res |= ibz_divides(&a, &b) != 0;
+    res |= ibz_rand_interval(&q, &a, &b) != 0;
+    res |= ibz_rand_interval_minm_m(&q, -1) != 0;
+    res |= ibz_rand_interval_bits(&q, IBZ_BITS - 1) != 0;
+    if (res != section_res) printf("  div_2exp regression failed\n");
+
+    /* Truncating and floor division for all sign combinations. */
+    section_res = res;
+    ibz_set(&a, -5);
+    ibz_set(&b, -2);
+    ibz_div(&q, &r, &a, &b);
+    res |= ibz_cmp_int32(&q, 2) != 0 || ibz_cmp_int32(&r, -1) != 0;
+    ibz_div_floor(&q, &r, &a, &b);
+    res |= ibz_cmp_int32(&q, 2) != 0 || ibz_cmp_int32(&r, -1) != 0;
+
+    ibz_set(&a, 5);
+    ibz_div_floor(&q, &r, &a, &b);
+    res |= ibz_cmp_int32(&q, -3) != 0 || ibz_cmp_int32(&r, -1) != 0;
+    /* Inputs may alias either output. */
+    ibz_div_floor(&a, &b, &a, &b);
+    res |= ibz_cmp_int32(&a, -3) != 0 || ibz_cmp_int32(&b, -1) != 0;
+
+    ibz_set(&a, -5);
+    ibz_set(&b, 2);
+    ibz_div_floor(&q, &r, &a, &b);
+    res |= ibz_cmp_int32(&q, -3) != 0 || ibz_cmp_int32(&r, 1) != 0;
+
+    for (int32_t numerator = -20; numerator <= 20; ++numerator) {
+        for (int32_t divisor = -7; divisor <= 7; ++divisor) {
+            if (divisor == 0)
+                continue;
+            ibz_set(&a, numerator);
+            ibz_set(&b, divisor);
+            ibz_div(&q, &r, &a, &b);
+            res |= ibz_cmp_int32(&q, numerator / divisor) != 0;
+            res |= ibz_cmp_int32(&r, numerator % divisor) != 0;
+
+            int32_t floor_q = numerator / divisor;
+            if (numerator % divisor != 0 &&
+                ((numerator < 0) != (divisor < 0)))
+                --floor_q;
+            const int32_t floor_r = numerator - floor_q * divisor;
+            ibz_div_floor(&q, &r, &a, &b);
+            res |= ibz_cmp_int32(&q, floor_q) != 0;
+            res |= ibz_cmp_int32(&r, floor_r) != 0;
+        }
+    }
+    if (res != section_res) printf("  signed division regression failed\n");
+
+    /* INTBIG_MIN remains usable in division, GCD, size and string paths. */
+    section_res = res;
+    ibz_set(&b, 3);
+    ibz_div(&q, &r, &min_value, &b);
+    ibz_mul(&check, &q, &b);
+    ibz_add(&check, &check, &r);
+    if (ibz_cmp(&check, &min_value) != 0) { printf("    MIN division identity\n"); res = 1; }
+    ibz_gcd(&check, &min_value, &b);
+    if (!ibz_is_one(&check)) { printf("    MIN gcd 3\n"); res = 1; }
+    ibz_init(&b);
+    ibz_gcd(&check, &min_value, &b);
+    if (ibz_cmp(&check, &min_value) != 0) { printf("    MIN gcd 0\n"); res = 1; }
+    ibz_gcdext(&check, &q, &r, &min_value, &b);
+    if (ibz_cmp(&check, &min_value) != 0 || !ibz_is_one(&q) || !ibz_is_zero(&r)) {
+        printf("    MIN gcdext 0\n");
+        res = 1;
+    }
+    ibz_gcdext(&check, &q, &r, &min_value, &min_value);
+    if (ibz_cmp(&check, &min_value) != 0 || !ibz_is_zero(&q) || !ibz_is_one(&r)) {
+        printf("    MIN gcdext MIN\n");
+        res = 1;
+    }
+    if (ibz_bitsize(&min_value) != IBZ_BITS) { printf("    MIN bitsize\n"); res = 1; }
+    ibz_abs(&check, &min_value);
+    if (ibz_cmp(&check, &min_value) != 0) { printf("    MIN abs\n"); res = 1; }
+
+    char min_string[IBZ_BITS / 4 + 3];
+    char overflow_string[IBZ_BITS / 4 + 3];
+    if (!ibz_convert_to_str(&min_value, min_string, 16)) { printf("    MIN to string status\n"); res = 1; }
+    if (min_string[0] != '-' || min_string[1] != '8') { printf("    MIN string prefix\n"); res = 1; }
+    if (strlen(min_string) != (size_t)(IBZ_BITS / 4 + 1)) { printf("    MIN string length %zu\n", strlen(min_string)); res = 1; }
+    if (ibz_size_in_base(&min_value, 16) != (size_t)(IBZ_BITS / 4)) { printf("    MIN size base\n"); res = 1; }
+    if (!ibz_set_from_str(&check, min_string, 16)) { printf("    MIN parse status\n"); res = 1; }
+    if (ibz_cmp(&check, &min_value) != 0) { printf("    MIN parse value\n"); res = 1; }
+    char min_decimal[IBZ_BITS + 3];
+    if (!ibz_convert_to_str(&min_value, min_decimal, 10) ||
+        strlen(min_decimal) != ibz_size_in_base(&min_value, 10) + 1 ||
+        !ibz_set_from_str(&check, min_decimal, 10) ||
+        ibz_cmp(&check, &min_value) != 0) {
+        printf("    MIN decimal round trip\n");
+        res = 1;
+    }
+
+    memset(overflow_string, '0', (size_t)(IBZ_BITS / 4));
+    overflow_string[0] = '8';
+    overflow_string[IBZ_BITS / 4] = '\0';
+    if (ibz_set_from_str(&check, overflow_string, 16) != 0) { printf("    positive overflow accepted\n"); res = 1; }
+    overflow_string[0] = '-';
+    overflow_string[1] = '8';
+    memset(overflow_string + 2, '0', (size_t)(IBZ_BITS / 4 - 1));
+    overflow_string[IBZ_BITS / 4 + 1] = '\0';
+    overflow_string[IBZ_BITS / 4] = '1';
+    if (ibz_set_from_str(&check, overflow_string, 16) != 0) { printf("    negative overflow accepted\n"); res = 1; }
+    if (ibz_set_from_str(&check, "", 10) != 0) { printf("    empty accepted\n"); res = 1; }
+    if (ibz_set_from_str(&check, "-", 10) != 0) { printf("    sign accepted\n"); res = 1; }
+    if (res != section_res) printf("  INTBIG_MIN/string regression failed\n");
+
+    /* Bounded export reports the required magnitude and never partially
+     * publishes a value into an undersized buffer. */
+    section_res = res;
+    digit_t too_small[IBZ_LIMBS - 1];
+    memset(too_small, 0xa5, sizeof(too_small));
+    res |= ibz_digits_required(&min_value) != IBZ_LIMBS;
+    res |= ibz_to_digits_checked(too_small, IBZ_LIMBS - 1, &min_value) != 0;
+    for (size_t i = 0; i < IBZ_LIMBS - 1; ++i)
+        res |= too_small[i] != 0;
+    digit_t enough[IBZ_LIMBS];
+    res |= !ibz_to_digits_checked(enough, IBZ_LIMBS, &min_value);
+    res |= enough[IBZ_LIMBS - 1] != (UINT64_C(1) << 63);
+    ibz_set(&a, -5);
+    res |= !ibz_to_digits_checked(enough, IBZ_LIMBS, &a);
+    res |= enough[0] != 5;
+    if (res != section_res) printf("  bounded export regression failed\n");
+
+    /* e=0 is reduced modulo m, and multiplication is correct even when the
+     * unreduced product needs nearly twice the signed precision. */
+    section_res = res;
+    ibz_set(&a, 123);
+    ibz_init(&exponent);
+    ibz_set(&b, 1);
+    ibz_pow_mod(&check, &a, &exponent, &b);
+    res |= !ibz_is_zero(&check);
+
+    ibz_sub(&a, &max_value, &ibz_const_one);
+    ibz_set(&exponent, 2);
+    ibz_pow_mod(&check, &a, &exponent, &max_value);
+    res |= !ibz_is_one(&check);
+    ibz_sub(&a, &a, &ibz_const_one);
+    ibz_pow_mod(&check, &a, &exponent, &max_value);
+    res |= ibz_cmp_int32(&check, 4) != 0;
+    ibz_pow(&check, &max_value, 1);
+    res |= ibz_cmp(&check, &max_value) != 0;
+    if (res != section_res) printf("  modular power regression failed\n");
+
+    if (res)
+        printf("Quaternion module fixed-precision integer regressions failed\n");
+
+    ibz_finalize(&a);
+    ibz_finalize(&b);
+    ibz_finalize(&q);
+    ibz_finalize(&r);
+    ibz_finalize(&check);
+    ibz_finalize(&min_value);
+    ibz_finalize(&max_value);
+    ibz_finalize(&exponent);
+    return res;
+}
+
 // void ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b);
 // void ibz_sqrt_floor(ibz_t *sqrt, const ibz_t *a);
 int
@@ -269,6 +529,8 @@ ibz_test_mul_sqrt()
     ibz_add(&m, &m, &ibz_const_one);
     res = res | ibz_sqrt(&d, &m);
 #endif
+
+    res |= ibz_test_fixed_precision_regressions();
 
     if (res) {
         printf("Quaternion module integer group test ibz_test_mul_sqrt failed\n");
@@ -999,6 +1261,7 @@ ibz_test_intbig()
     res = res | ibz_test_init_set_cmp();
     res = res | ibz_test_add_sub_neg_abs();
     res = res | ibz_test_mul_sqrt();
+    res = res | ibz_test_mul_thread_safety();
     res = res | ibz_test_div();
     res = res | ibz_test_mod();
     res = res | ibz_test_pow();

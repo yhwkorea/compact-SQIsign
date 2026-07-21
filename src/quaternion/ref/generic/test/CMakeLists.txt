@@ -32,7 +32,7 @@ FOREACH(SVARIANT ${SVARIANT_S})
     set(TEST_NAME sqisign_test_quaternion_${SVARIANT_LOWER})
 
     add_executable(${TEST_NAME} ${SOURCE_FILES_QUATERNION_GENERIC_REF_TESTS} test_quaternions.c)
-    target_link_libraries(${TEST_NAME} ${LIB_QUATERNION_${SVARIANT_UPPER}} sqisign_common_sys)
+    target_link_libraries(${TEST_NAME} ${LIB_QUATERNION_${SVARIANT_UPPER}} sqisign_common_sys pthread)
     target_include_directories(${TEST_NAME} PRIVATE ../internal_quaternion_headers ${INC_COMMON} ${INC_QUATERNION} ${INC_PUBLIC} ${PROJECT_SOURCE_DIR}/src/mini-gmp)
     target_compile_definitions(${TEST_NAME} PUBLIC SQISIGN_VARIANT=${SVARIANT_LOWER})
 

@@ -13,8 +13,8 @@ else
     sed -i 's|//#define DISABLE_NAMESPACING|#define DISABLE_NAMESPACING|' ./include/sqisign_namespace.h
 fi
 
-mkdir -p build_broadwell && cd build_broadwell && cmake -DSQISIGN_BUILD_TYPE=broadwell .. && make -j8 && cd ..
-mkdir -p build && cd build && cmake .. && make -j8
+mkdir -p build_broadwell && cd build_broadwell && cmake -DSQISIGN_BUILD_TYPE=broadwell -DENABLE_ML2_PROFILE=ON .. && make -j8 && cd ..
+mkdir -p build && cd build && cmake -DENABLE_ML2_PROFILE=ON .. && make -j8
 find . ../build_broadwell -name '*.a' -exec nm {} \; | grep '.c.o:\|T ' | scala -nc ../scripts/Namespace.scala > sqisign_namespace.h
 
 if [[ "$OSTYPE" == "darwin"* ]]; then

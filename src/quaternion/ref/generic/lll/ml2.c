@@ -37,20 +37,16 @@
 
 #define SYM_LOWER(M, i, j) ((i) >= (j) ? &(M)[i][j] : &(M)[j][i])
 
-/* paper Issue 17 / Gap H: track max bit observed in ML2 internals to compare
- * against paper Theorem (Improved Sign bound 2^21*p^7 ~ 1757 bit at lvl1). */
-static int _ml2_peak_bit = 0;
-static inline void _ml2_track(const ibz_t *x) {
-    int b = ibz_bitsize(x);
-    if (b > _ml2_peak_bit) _ml2_peak_bit = b;
-}
-
 /* ========== state ========== */
 
 typedef struct {
     int d;
     int zeta;
     int aborted; /* 1 if main_loop hit oscillation/iter cap */
+    /* NULL selects the Euclidean fallback used by algebra-independent
+     * span-only callers.  Compact quaternion algorithms always pass alg and
+     * therefore use the reduced-norm form diag(1, 1, p, p). */
+    const ibz_t *p;
     ibz_vec_4_t b[ML2_MAX_D];
     ibz_t G[ML2_MAX_D][ML2_MAX_D]; /* lower triangular, G[i][j] for j <= i */
     dpe_t r[ML2_MAX_D][ML2_MAX_D];
@@ -60,11 +56,12 @@ typedef struct {
 } ml2_state_t;
 
 static void
-ml2_state_init(ml2_state_t *st, int d)
+ml2_state_init(ml2_state_t *st, int d, const quat_alg_t *alg)
 {
     st->d = d;
     st->zeta = 0;
     st->aborted = 0;
+    st->p = alg == NULL ? NULL : &alg->p;
     for (int i = 0; i < d; i++) {
         ibz_vec_4_init(&st->b[i]);
         for (int j = 0; j < d; j++) {
@@ -99,7 +96,35 @@ ml2_state_finalize(ml2_state_t *st)
     dpe_clear(st->eta_bar);
 }
 
-/* Recompute the integer Gram matrix from scratch: G[i][j] = <b_i, b_j> for j <= i */
+/* ML2's active Gram--Schmidt block must start with a positive diagonal.
+ * Move exact zero generators into the skipped prefix before any floating
+ * division is attempted.  The stable rotation keeps the relative order of
+ * nonzero generators, which also keeps retry permutations deterministic. */
+static void
+ml2_partition_initial_zeros(ml2_state_t *st)
+{
+    int zeta = 0;
+
+    for (int i = 0; i < st->d; i++) {
+        if (!ibz_vec_4_is_zero(&st->b[i]))
+            continue;
+        for (int j = i; j > zeta; j--)
+            for (int coordinate = 0; coordinate < 4; coordinate++)
+                ibz_swap(&st->b[j][coordinate],
+                         &st->b[j - 1][coordinate]);
+        zeta++;
+    }
+    st->zeta = zeta;
+}
+
+/* Recompute the exact integer Gram matrix from scratch.  In the quaternion
+ * algebra (-1,-p), half the trace pairing (equivalently, the reduced-norm
+ * bilinear form) is
+ *
+ *   <a,b> = a0*b0 + a1*b1 + p*(a2*b2 + a3*b3).
+ *
+ * The omitted common factor 2 has no effect on ML2's decisions.  A NULL p is
+ * the documented Euclidean fallback for algebra-independent span reduction. */
 static void
 ml2_recompute_gram(ml2_state_t *st)
 {
@@ -110,10 +135,10 @@ ml2_recompute_gram(ml2_state_t *st)
             ibz_set(&st->G[i][j], 0);
             for (int k = 0; k < 4; k++) {
                 ibz_mul(&tmp, &st->b[i][k], &st->b[j][k]);
-                _ml2_track(&tmp);
+                if (k >= 2 && st->p != NULL)
+                    ibz_mul(&tmp, &tmp, st->p);
                 ibz_add(&st->G[i][j], &st->G[i][j], &tmp);
             }
-            _ml2_track(&st->G[i][j]);
         }
     }
     ibz_finalize(&tmp);
@@ -271,7 +296,8 @@ ml2_insert_before(ml2_state_t *st, int from, int to)
 }
 
 /* ========== ML2 main loop (paper Algorithm 13, 0-indexed) ==========
- * Init: r[0][0] = G[0][0]; kappa = 1; zeta = 0.
+ * Init after exact-zero partitioning:
+ *   r[zeta][zeta] = G[zeta][zeta]; kappa = zeta + 1.
  * Loop: while kappa < d
  *   LazySizeReduce(kappa)
  *   kappa_prime = kappa
@@ -287,8 +313,14 @@ ml2_main_loop(ml2_state_t *st)
     dpe_t delta_r;
     dpe_init(delta_r);
 
-    dpe_set_z(st->r[0][0], &st->G[0][0]);
-    int kappa = 1;
+    if (st->zeta == st->d) {
+        dpe_clear(delta_r);
+        return;
+    }
+
+    dpe_set_z(st->r[st->zeta][st->zeta],
+              &st->G[st->zeta][st->zeta]);
+    int kappa = st->zeta + 1;
     int outer_iter = 0;
     /* paper Issue 13 (author reply): "size-reduce keeps entry count unchanged and size monotonically non-increasing".
      * Paper ML2 (NS09 Fig 9) does not have abort/oscillation detection — convergence
@@ -300,11 +332,6 @@ ml2_main_loop(ml2_state_t *st)
     while (kappa < st->d) {
         outer_iter++;
         if (outer_iter > OUTER_MAX) {
-            static int _over_n = 0;
-            if (_over_n++ < 3)
-                fprintf(stderr, "[ML2-MAIN-OVER] iter>%d kappa=%d zeta=%d d=%d\n",
-                    OUTER_MAX, kappa, st->zeta, st->d);
-            fflush(stderr);
             st->aborted = 1;
             break;
         }
@@ -328,13 +355,6 @@ ml2_main_loop(ml2_state_t *st)
             }
             dpe_set(st->r[kappa][kappa], st->s[kappa]);
             ml2_insert_before(st, kappa_prime, kappa);
-            /* paper-faithful fix (2026-05-17): insertion reorders b[zeta..kappa_prime],
-             * so r[j][*], mu[j][*] for j in (kappa, kappa_prime] are stale. Recompute
-             * the Cholesky rows for those positions so the next outer iter's Lovász
-             * test sees fresh state — otherwise main loop oscillates. */
-            for (int j = kappa + 1; j <= kappa_prime; j++) {
-                ml2_cfa_kappa(st, j);
-            }
         }
 
         if (ibz_vec_4_is_zero(&st->b[kappa])) {
@@ -347,6 +367,24 @@ ml2_main_loop(ml2_state_t *st)
                 ml2_recompute_gram(st);
             }
             st->zeta++;
+            /* Insertion of a dependent generator can expose a new first
+             * active vector.  Restart its factorization from an exact,
+             * strictly positive diagonal before processing another row;
+             * otherwise the stale zero diagonal again becomes a divisor. */
+            if (st->zeta < st->d)
+                dpe_set_z(st->r[st->zeta][st->zeta],
+                          &st->G[st->zeta][st->zeta]);
+            kappa = st->zeta + 1;
+            continue;
+        }
+
+        if (kappa != kappa_prime) {
+            /* Insertion reorders b[zeta..kappa_prime], so r[j][*] and
+             * mu[j][*] for j in (kappa,kappa_prime] are stale.  Recompute
+             * those rows only after ruling out a zero at the insertion
+             * point, since a zero row has no valid Gram--Schmidt divisor. */
+            for (int j = kappa + 1; j <= kappa_prime; j++)
+                ml2_cfa_kappa(st, j);
         }
 
         int next = kappa + 1;
@@ -358,24 +396,48 @@ ml2_main_loop(ml2_state_t *st)
     dpe_clear(delta_r);
 }
 
-/* Lemma 8 bounds every exact ML2 integer by max_i ||b_i||^2.  For four
- * coordinates of at most `max_bits`, a conservative bit bound is
- * 2*max_bits+2.  Refuse the call before forming G if that value does not fit
- * in the signed fixed-width representation.  Permuting generators cannot
- * change this condition, so retrying an unsafe input would only repeat an
- * overflowing computation. */
+/* If nonzero positive integers x and y satisfy x < 2^x_bits and
+ * y < 2^y_bits, then x+y < 2^max(x_bits,y_bits)+1.  Zero has bound zero. */
 static int
-ml2_input_fits_precision(const ibz_vec_4_t *input, int d)
+ml2_positive_sum_bound(int x_bits, int y_bits)
 {
-    int max_bits = 0;
+    if (x_bits == 0)
+        return y_bits;
+    if (y_bits == 0)
+        return x_bits;
+    return (x_bits > y_bits ? x_bits : y_bits) + 1;
+}
+
+/* Lemma 8 bounds every exact ML2 integer by max_i ||b_i||_p^2.  Bound each
+ * initial diagonal Gram entry coordinate-by-coordinate, so a large p is
+ * charged only to coordinates 2 and 3:
+ *
+ *   b0^2 + b1^2 + p*(b2^2 + b3^2).
+ *
+ * This is both rigorous before any fixed-width multiplication takes place
+ * and substantially tighter than adding bits(p) to twice the largest of all
+ * four coordinates.  Permuting generators cannot change the bound. */
+static int
+ml2_input_fits_precision(const ibz_vec_4_t *input,
+                         int d,
+                         const quat_alg_t *alg)
+{
+    int p_bits = alg == NULL ? 0 : ibz_bitsize(&alg->p);
+
     for (int i = 0; i < d; i++) {
+        int norm_bound = 0;
         for (int coordinate = 0; coordinate < 4; coordinate++) {
             int bits = ibz_bitsize(&input[i][coordinate]);
-            if (bits > max_bits)
-                max_bits = bits;
+            int term_bound = bits == 0 ? 0 : 2 * bits;
+            if (term_bound != 0 && coordinate >= 2 && alg != NULL &&
+                !ibz_is_one(&alg->p))
+                term_bound += p_bits;
+            norm_bound = ml2_positive_sum_bound(norm_bound, term_bound);
         }
+        if (norm_bound > IBZ_BITS - 1)
+            return 0;
     }
-    return 2 * max_bits + 2 <= IBZ_BITS - 1;
+    return 1;
 }
 
 /* ========== entry point ==========
@@ -390,54 +452,25 @@ quat_ml2(ibz_vec_4_t *output,
          int d,
          const quat_alg_t *alg)
 {
-    (void)alg;
     if (input == NULL || (out_capacity > 0 && output == NULL) ||
         d < 1 || d > ML2_MAX_D || out_capacity < 0)
         return -1;
+    if (alg != NULL && ibz_cmp(&alg->p, &ibz_const_zero) <= 0)
+        return -1;
 
-    static int _ml2_n = 0;
-    int N = _ml2_n++;
-    int trace = (N < 3);
-    if (trace) {
-        fprintf(stderr, "[ML2 #%d] entry d=%d out_cap=%d input[0][0..3] limb0: %016lx %016lx %016lx %016lx\n",
-            N, d, out_capacity,
-            (unsigned long)input[0][0][0], (unsigned long)input[0][1][0],
-            (unsigned long)input[0][2][0], (unsigned long)input[0][3][0]);
-        fflush(stderr);
-    }
-    if (!ml2_input_fits_precision(input, d)) {
-        if (trace)
-            fprintf(stderr, "[ML2 #%d] PRECISION REJECT\n", N);
+    if (!ml2_input_fits_precision(input, d, alg))
         return QUAT_ML2_ERR_PRECISION;
-    }
 
     ml2_state_t st;
-    ml2_state_init(&st, d);
-    int local_peak_start = _ml2_peak_bit;
-    _ml2_peak_bit = 0;
-    int input_peak = 0;
+    ml2_state_init(&st, d, alg);
     for (int i = 0; i < d; i++)
         for (int c = 0; c < 4; c++) {
             ibz_copy(&st.b[i][c], &input[i][c]);
-            int bb = ibz_bitsize(&st.b[i][c]);
-            if (bb > input_peak) input_peak = bb;
-            _ml2_track(&st.b[i][c]);
         }
-    if (trace) {
-        fprintf(stderr, "[ML2 #%d] input_peak=%d (max bit among 8x4 input entries)\n", N, input_peak);
-        fflush(stderr);
-    }
+    ml2_partition_initial_zeros(&st);
     ml2_recompute_gram(&st);
-    if (trace) {
-        fprintf(stderr, "[ML2 #%d] post_gram peak_so_far=%d\n", N, _ml2_peak_bit);
-        fflush(stderr);
-    }
-    if (trace) { fprintf(stderr, "[ML2 #%d] gram done G[0][0] limb0..3: %016lx %016lx %016lx %016lx\n", N,
-        (unsigned long)st.G[0][0][0], (unsigned long)st.G[0][0][1],
-        (unsigned long)st.G[0][0][2], (unsigned long)st.G[0][0][3]); fflush(stderr); }
 
     ml2_main_loop(&st);
-    if (trace) { fprintf(stderr, "[ML2 #%d] main_loop done zeta=%d aborted=%d\n", N, st.zeta, st.aborted); fflush(stderr); }
 
     int rho;
     int n;
@@ -448,7 +481,6 @@ quat_ml2(ibz_vec_4_t *output,
          * independent, and the input generators are only a sublattice basis
          * (not the union lattice), so neither is safe to return blindly. */
         ml2_state_finalize(&st);
-        if (trace) { fprintf(stderr, "[ML2 #%d] exit abort signal -1\n", N); fflush(stderr); }
         (void)output;
         (void)out_capacity;
         return -1;
@@ -470,23 +502,7 @@ quat_ml2(ibz_vec_4_t *output,
         for (int c = 0; c < 4; c++)
             ibz_copy(&output[i][c], &st.b[st.zeta + i][c]);
 
-    /* Track final b and G size for peak report */
-    for (int i = 0; i < d; i++)
-        for (int c = 0; c < 4; c++)
-            _ml2_track(&st.b[i][c]);
-    for (int i = 0; i < d; i++)
-        for (int j = 0; j <= i; j++)
-            _ml2_track(&st.G[i][j]);
-
-    if (trace) {
-        fprintf(stderr, "[ML2 #%d] peak_bit_seen=%d (paper sign bound 2^21*p^7 ~ 1757 bit at lvl1)\n",
-            N, _ml2_peak_bit);
-        fflush(stderr);
-    }
-    (void)local_peak_start;
-
     ml2_state_finalize(&st);
-    if (trace) { fprintf(stderr, "[ML2 #%d] exit rho=%d copied n=%d\n", N, rho, n); fflush(stderr); }
     return rho;
 }
 
@@ -584,13 +600,20 @@ quat_ml2_profile_get(quat_ml2_profile_t *output)
 }
 #endif
 
-int
-quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
-                            int out_capacity,
-                            const ibz_vec_4_t *input,
-                            int d,
-                            const quat_alg_t *alg,
-                            quat_ml2_reducer_t reducer)
+/* Shared retry driver.  `retain_first_lower_rank` is used by generic MLLL:
+ * a nonnegative rank below four is a valid result and is published without
+ * pointless permutations.  Full-rank lattice operations leave it false and
+ * publish only a rank-four attempt.  Keeping attempt 0 inside this driver is
+ * also essential for profiling: one logical input and every actually
+ * executed reduction attempt are accounted for in exactly one place. */
+static int
+ml2_retry_driver(ibz_vec_4_t *output,
+                 int out_capacity,
+                 const ibz_vec_4_t *input,
+                 int d,
+                 const quat_alg_t *alg,
+                 quat_ml2_reducer_t reducer,
+                 int retain_first_lower_rank)
 {
     ibz_vec_4_t permuted[ML2_MAX_D];
     ibz_vec_4_t scratch[4];
@@ -603,6 +626,8 @@ quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
     if (output == NULL || input == NULL || reducer == NULL ||
         d < 1 || d > ML2_MAX_D || out_capacity < 4)
         return -1;
+    if (alg != NULL && ibz_cmp(&alg->p, &ibz_const_zero) <= 0)
+        return -1;
 
 #if defined(SQISIGN_ML2_PROFILE)
     profile_dimension = ml2_profile_for_dimension(d);
@@ -610,7 +635,7 @@ quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
         atomic_fetch_add(&profile_dimension->inputs, 1);
 #endif
 
-    if (!ml2_input_fits_precision(input, d)) {
+    if (!ml2_input_fits_precision(input, d, alg)) {
 #if defined(SQISIGN_ML2_PROFILE)
         if (profile_dimension != NULL)
             atomic_fetch_add(&profile_dimension->precision_rejected, 1);
@@ -659,9 +684,16 @@ quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
         if (profile_dimension != NULL && attempt == 0)
             atomic_fetch_add(&profile_dimension->first_attempt_failures, 1);
 #endif
+        if (attempt == 0 && retain_first_lower_rank && rho >= 0 && rho <= 4) {
+            for (int i = 0; i < rho; i++)
+                for (int c = 0; c < 4; c++)
+                    ibz_copy(&output[i][c], &scratch[i][c]);
+            result = rho;
+            break;
+        }
     }
 
-    if (result != 4) {
+    if (result < 0 || (!retain_first_lower_rank && result != 4)) {
         result = first_rho;
 #if defined(SQISIGN_ML2_PROFILE)
         if (profile_dimension != NULL)
@@ -674,6 +706,30 @@ quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
     for (int i = 0; i < d; i++)
         ibz_vec_4_finalize(&permuted[i]);
     return result;
+}
+
+int
+quat_ml2_retry_with_reducer(ibz_vec_4_t *output,
+                            int out_capacity,
+                            const ibz_vec_4_t *input,
+                            int d,
+                            const quat_alg_t *alg,
+                            quat_ml2_reducer_t reducer)
+{
+    return ml2_retry_driver(
+        output, out_capacity, input, d, alg, reducer, 0);
+}
+
+int
+quat_ml2_mlll_with_reducer(ibz_vec_4_t *output,
+                            int out_capacity,
+                            const ibz_vec_4_t *input,
+                            int d,
+                            const quat_alg_t *alg,
+                            quat_ml2_reducer_t reducer)
+{
+    return ml2_retry_driver(
+        output, out_capacity, input, d, alg, reducer, 1);
 }
 
 int

@@ -167,31 +167,31 @@ clear_cofactor_for_maximal_even_order(ec_point_t *P, ec_curve_t *curve, int f)
     }
 }
 
+/* Bound both locally generated and attacker-triggered fallback searches.  A
+ * zero wire hint asks the decoder to repeat the search from candidate 128, so
+ * generation and decoding must use the same upper bound. */
+#define BASIS_SEARCH_MAX_CANDIDATE 1024U
+#define BASIS_MAX_ENCODED_CANDIDATE 127U
+
 // Helper function which finds an NQR -1 / (1 + i*b) for entangled basis generation
-static uint8_t
-find_nqr_factor(fp2_t *x, ec_curve_t *curve, const uint8_t start)
+static int
+find_nqr_factor(fp2_t *x, uint8_t *hint, ec_curve_t *curve, const uint32_t start)
 {
     // factor = -1/(1 + i*b) for b in Fp will be NQR whenever 1 + b^2 is NQR
     // in Fp, so we find one of these and then invert (1 + i*b). We store b
     // as a u8 hint to save time in verification.
 
-    // We return the hint as a u8, but use (uint16_t)n to give 2^16 - 1
-    // to make failure cryptographically negligible, with a fallback when
-    // n > 128 is required.
-    uint8_t hint;
-    uint32_t found = 0;
-    uint16_t n = start;
-
-    bool qr_b = 1;
     fp_t b, tmp;
     fp2_t z, t0, t1;
 
-    do {
-        while (qr_b) {
-            // find b with 1 + b^2 a non-quadratic residue
-            fp_set_small(&tmp, (uint32_t)n * n + 1);
-            qr_b = fp_is_square(&tmp);
-            n++; // keeps track of b = n - 1
+    *hint = 0;
+    for (uint32_t candidate = start;
+         candidate <= BASIS_SEARCH_MAX_CANDIDATE;
+         ++candidate) {
+        // find b with 1 + b^2 a non-quadratic residue
+        fp_set_small(&tmp, candidate * candidate + 1);
+        if (fp_is_square(&tmp)) {
+            continue;
         }
 
         // for Px := -A/(1 + i*b) to be on the curve
@@ -200,7 +200,7 @@ find_nqr_factor(fp2_t *x, ec_curve_t *curve, const uint8_t start)
 
         // t0 = z - 1 = i*b
         // t1 = z = 1 + i*b
-        fp_set_small(&b, (uint32_t)n - 1);
+        fp_set_small(&b, candidate);
         fp2_set_zero(&t0);
         fp2_set_one(&z);
         fp_copy(&z.im, &b);
@@ -211,53 +211,50 @@ find_nqr_factor(fp2_t *x, ec_curve_t *curve, const uint8_t start)
         fp2_mul(&t0, &t0, &t1); // A^2 * (z - 1)
         fp2_sqr(&t1, &z);
         fp2_sub(&t0, &t0, &t1); // A^2 * (z - 1) - z^2
-        found = !fp2_is_square(&t0);
+        if (fp2_is_square(&t0)) {
+            continue;
+        }
 
-        qr_b = 1;
-    } while (!found);
+        // set Px to -A/(1 + i*b)
+        fp2_copy(x, &z);
+        fp2_inv(x);
+        fp2_mul(x, x, &curve->A);
+        fp2_neg(x, x);
 
-    // set Px to -A/(1 + i*b)
-    fp2_copy(x, &z);
-    fp2_inv(x);
-    fp2_mul(x, x, &curve->A);
-    fp2_neg(x, x);
+        /* Candidates larger than seven bits are represented by a zero hint;
+         * decoding then repeats this bounded search starting at 128. */
+        *hint = candidate <= BASIS_MAX_ENCODED_CANDIDATE ?
+                    (uint8_t)candidate : 0;
+        return 1;
+    }
 
-    /*
-     * With very low probability n will not fit in 7 bits.
-     * We set hint = 0 which signals failure and the need
-     * to generate a value on the fly during verification
-     */
-    hint = n <= 128 ? n - 1 : 0;
-
-    return hint;
+    return 0;
 }
 
 // Helper function which finds a point x(P) = n * A
-static uint8_t
-find_nA_x_coord(fp2_t *x, ec_curve_t *curve, const uint8_t start)
+static int
+find_nA_x_coord(fp2_t *x, uint8_t *hint, ec_curve_t *curve, const uint32_t start)
 {
     assert(!fp2_is_square(&curve->A)); // Only to be called when A is a NQR
 
     // when A is NQR we allow x(P) to be a multiple n*A of A
-    uint8_t n = start;
-    if (n == 1) {
-        fp2_copy(x, &curve->A);
-    } else {
-        fp2_mul_small(x, &curve->A, n);
+    *hint = 0;
+    for (uint32_t candidate = start;
+         candidate <= BASIS_SEARCH_MAX_CANDIDATE;
+         ++candidate) {
+        fp2_mul_small(x, &curve->A, candidate);
+        if (!is_on_curve(x, curve)) {
+            continue;
+        }
+
+        /* Candidates larger than seven bits are represented by a zero hint;
+         * decoding then repeats this bounded search starting at 128. */
+        *hint = candidate <= BASIS_MAX_ENCODED_CANDIDATE ?
+                    (uint8_t)candidate : 0;
+        return 1;
     }
 
-    while (!is_on_curve(x, curve)) {
-        fp2_add(x, x, &curve->A);
-        n++;
-    }
-
-    /*
-     * With very low probability (1/2^128), n will not fit in 7 bits.
-     * In this case, we set hint = 0 which signals failure and the need
-     * to generate a value on the fly during verification
-     */
-    uint8_t hint = n < 128 ? n : 0;
-    return hint;
+    return 0;
 }
 
 // The entangled basis generation does not allow A = 0
@@ -288,18 +285,20 @@ ec_basis_E0_2f(ec_basis_t *PQ2, ec_curve_t *curve, int f)
 
 // Computes a basis E[2^f] = <P, Q> where the point Q is above (0 : 0)
 // and stores hints as an array for faster recomputation at a later point
-uint8_t
-ec_curve_to_basis_2f_to_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f)
+int
+ec_curve_to_basis_2f_to_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, uint8_t *hint)
 {
+    *hint = 0;
+
     // Normalise (A/C : 1) and ((A + 2)/4 : 1)
     ec_normalize_curve_and_A24(curve);
 
     if (fp2_is_zero(&curve->A)) {
         ec_basis_E0_2f(PQ2, curve, f);
-        return 0;
+        return 1;
     }
 
-    uint8_t hint;
+    uint8_t point_hint;
     bool hint_A = fp2_is_square(&curve->A);
 
     // Compute the points P, Q
@@ -307,11 +306,15 @@ ec_curve_to_basis_2f_to_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f)
 
     if (!hint_A) {
         // when A is NQR we allow x(P) to be a multiple n*A of A
-        hint = find_nA_x_coord(&P.x, curve, 1);
+        if (!find_nA_x_coord(&P.x, &point_hint, curve, 1)) {
+            return 0;
+        }
     } else {
         // when A is QR we instead have to find (1 + b^2) a NQR
         // such that x(P) = -A / (1 + i*b)
-        hint = find_nqr_factor(&P.x, curve, 1);
+        if (!find_nqr_factor(&P.x, &point_hint, curve, 1)) {
+            return 0;
+        }
     }
 
     fp2_set_one(&P.z);
@@ -330,8 +333,9 @@ ec_curve_to_basis_2f_to_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f)
 
     // Finally, we compress hint_A and hint into a single bytes.
     // We choose to set the LSB of hint to hint_A
-    assert(hint < 128); // We expect hint to be 7-bits in size
-    return (hint << 1) | hint_A;
+    assert(point_hint < 128); // The point hint is 7-bits in size
+    *hint = (uint8_t)((point_hint << 1) | hint_A);
+    return 1;
 }
 
 // Computes a basis E[2^f] = <P, Q> where the point Q is above (0 : 0)
@@ -343,6 +347,12 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
     ec_normalize_curve_and_A24(curve);
 
     if (fp2_is_zero(&curve->A)) {
+        /* The dedicated E0 basis has no search choice.  Generation encodes
+         * this case with the unique hint 0, so accepting any other byte would
+         * create non-canonical public-key/signature encodings. */
+        if (hint != 0) {
+            return 0;
+        }
         ec_basis_E0_2f(PQ2, curve, f);
         return 1;
     }
@@ -351,6 +361,12 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
     // The remaining 7-bits are used to find a valid x(P)
     bool hint_A = hint & 1;
     uint8_t hint_P = hint >> 1;
+
+    /* Reject a hint that selects the wrong construction before entering a
+     * helper whose precondition depends on the quadratic character of A. */
+    if ((bool)fp2_is_square(&curve->A) != hint_A) {
+        return 0;
+    }
 
     // Compute the points P, Q
     ec_point_t P, Q;
@@ -361,9 +377,15 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
         // In either case, we can start with b = 128 to skip testing the known
         // values which will not work
         if (!hint_A) {
-            find_nA_x_coord(&P.x, curve, 128);
+            uint8_t ignored_hint;
+            if (!find_nA_x_coord(&P.x, &ignored_hint, curve, 128)) {
+                return 0;
+            }
         } else {
-            find_nqr_factor(&P.x, curve, 128);
+            uint8_t ignored_hint;
+            if (!find_nqr_factor(&P.x, &ignored_hint, curve, 128)) {
+                return 0;
+            }
         }
     } else {
         // Otherwise we use the hint to directly find x(P) based on hint_A
@@ -382,14 +404,12 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
     }
     fp2_set_one(&P.z);
 
-#ifndef NDEBUG
-    int passed = 1;
-    passed = is_on_curve(&P.x, curve);
-    passed &= !fp2_is_square(&P.x);
-
-    if (!passed)
+    /* Hints come from an untrusted public key or signature during
+     * verification, so these validity checks must also run in release builds. */
+    if (!is_on_curve(&P.x, curve) ||
+        fp2_is_square(&P.x)) {
         return 0;
-#endif
+    }
 
     // set xQ to -xP - A
     fp2_add(&Q.x, &curve->A, &P.x);
@@ -405,12 +425,9 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
     copy_point(&PQ2->P, &P);
     copy_point(&PQ2->PmQ, &Q);
 
-#ifndef NDEBUG
-    passed &= test_basis_order_twof(PQ2, curve, f);
-
-    if (!passed)
+    if (!test_basis_order_twof(PQ2, curve, f)) {
         return 0;
-#endif
+    }
 
     return 1;
 }

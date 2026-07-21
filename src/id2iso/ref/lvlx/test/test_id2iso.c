@@ -57,6 +57,7 @@ main(int argc, char *argv[])
     printf("\nRunning dim2id2iso module unit tests\n");
 
     printf("\nRunning find uv tests \n");
+    res = res & dim2id2iso_enumerate_hypercube_regression_test();
     int number_test_find_uv = 5;
     for (int i = 0; i < number_test_find_uv; i++) {
         res = res & dim2id2iso_test_find_uv();

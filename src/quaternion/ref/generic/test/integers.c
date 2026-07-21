@@ -52,6 +52,23 @@ quat_test_integer_ibz_cornacchia_prime(void)
     printf("cornacchia returned: %d\n", ibz_cornacchia_prime(&x, &y, &n, &p));
     printf("x = "); ibz_print(&x,10); printf("\n");
     printf("y = "); ibz_print(&y,10); printf("\n");
+
+    /* Regression: Cornacchia passes the same object as the modular-square-
+     * root input and output.  The operation must preserve the radicand until
+     * it has been reduced. */
+    ibz_set(&p, 13);
+    ibz_set(&c_res, -1);
+    res |= !ibz_sqrt_mod_p(&c_res, &c_res, &p);
+    ibz_mul(&prod, &c_res, &c_res);
+    ibz_mod(&prod, &prod, &p);
+    res |= ibz_cmp_int32(&prod, 12) != 0;
+
+    ibz_set(&n, 1);
+    res |= !ibz_cornacchia_prime(&x, &y, &n, &p);
+    ibz_mul(&c_res, &x, &x);
+    ibz_mul(&prod, &y, &y);
+    ibz_add(&c_res, &c_res, &prod);
+    res |= ibz_cmp(&c_res, &p) != 0;
     // if (ibz_cornacchia_prime(&x, &y, &n, &p)) {
     //     ibz_mul(&c_res, &x, &x);
     //     ibz_mul(&prod, &y, &y);

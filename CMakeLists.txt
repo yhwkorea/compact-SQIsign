@@ -7,8 +7,6 @@ set(SQISIGN_SO_VERSION "0")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-include(CTest)
-
 option(ENABLE_STRICT "Build with strict compile options." ON)
 option(ENABLE_TESTS  "Enable compilation of tests." ON)
 option(ENABLE_KAT_TESTS "Enable stored-vector regression tests (not correctness tests)." OFF)
@@ -17,6 +15,15 @@ option(ENABLE_INTBIG_OVERFLOW_CHECK "Abort when fixed-width signed add/sub/mul o
 option(ENABLE_CT_TESTING  "Enable compilation for constant time testing." OFF)
 option(ENABLE_SIGN "Build with sign functionality" ON)
 option(ENABLE_GMP "Enable GMP library (not needed for fixed-precision implementation)" OFF)
+
+if(ENABLE_KAT_TESTS AND NOT ENABLE_TESTS)
+    message(FATAL_ERROR "ENABLE_KAT_TESTS requires ENABLE_TESTS=ON")
+endif()
+
+if(ENABLE_TESTS)
+    include(CTest)
+    enable_testing()
+endif()
 
 if(ENABLE_ML2_PROFILE)
     add_compile_definitions(SQISIGN_ML2_PROFILE)
@@ -64,11 +71,8 @@ set(INC_PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
 add_subdirectory(src)
 add_subdirectory(apps)
-add_subdirectory(test)
+if(ENABLE_TESTS)
+    add_subdirectory(test)
+endif()
 
 include(.cmake/bm.cmake)
-
-#if(ENABLE_TESTS)
-#    enable_testing()
-#    add_subdirectory(test)
-#endif()

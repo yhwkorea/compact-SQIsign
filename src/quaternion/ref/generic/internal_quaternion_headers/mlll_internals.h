@@ -19,7 +19,7 @@
 #define MLLL_DIM 4
 
 /**
- * @brief Modified LLL algorithm (Pohst 1987)
+ * @brief Compact modified LLL algorithm backed by NS09 ML2
  *
  * Given g generating vectors of a lattice in Z^4, compute an LLL-reduced
  * basis of the lattice they span. Handles linear dependencies automatically.
@@ -29,7 +29,7 @@
  * @param rank Output: rank of the lattice (number of basis vectors found)
  * @param generators Array of g vectors in Z^4 (each is ibz_vec_4_t)
  * @param g Number of generators (must be <= MLLL_MAX_GENERATORS)
- * @param alg The quaternion algebra (used for norm computation)
+ * @param alg The quaternion algebra; selects the reduced-norm Gram form
  */
 void quat_mlll(ibz_mat_4x4_t *basis,
                int *rank,
@@ -47,8 +47,11 @@ void quat_mlll(ibz_mat_4x4_t *basis,
  * @param lat1 First lattice
  * @param lat2 Second lattice
  * @param alg The quaternion algebra
+ * @returns 1 on success, 0 with res unchanged on invalid input, precision
+ *          exhaustion, or incomplete reduction.  Aliasing res with either
+ *          input is supported.
  */
-void quat_lattice_mul_mlll(quat_lattice_t *res,
+int quat_lattice_mul_mlll(quat_lattice_t *res,
                            const quat_lattice_t *lat1,
                            const quat_lattice_t *lat2,
                            const quat_alg_t *alg);

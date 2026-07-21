@@ -76,8 +76,10 @@ int protocols_sign(signature_t *sig, const public_key_t *pk, secret_key_t *sk, c
  * @param enc : Byte array to encode the secret key (including public key) in
  * @param sk : Secret key to encode
  * @param pk : Public key to encode
+ * @returns 1 on success, 0 if a key component cannot be represented or the
+ * secret ideal generator search fails
  */
-void secret_key_to_bytes(unsigned char *enc, const secret_key_t *sk, const public_key_t *pk);
+int secret_key_to_bytes(unsigned char *enc, const secret_key_t *sk, const public_key_t *pk);
 
 /**
  * @brief Decodes a secret key (and public key) from a byte array

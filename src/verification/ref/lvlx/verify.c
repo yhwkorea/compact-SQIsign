@@ -14,6 +14,13 @@ check_canonical_basis_change_matrix(const signature_t *sig)
     int ret = 1;
     scalar_t aux;
 
+    /* `backtracking` is decoded from an untrusted signature.  Validate it
+     * before using it as a shift count: a value larger than the configured
+     * response length would otherwise turn the subtraction below into a huge
+     * unsigned shift inside multiple_mp_shiftl(). */
+    if ((int)sig->backtracking > SQIsign_response_length)
+        return 0;
+
     memset(aux, 0, NWORDS_ORDER * sizeof(digit_t));
     aux[0] = 0x1;
     multiple_mp_shiftl(aux, SQIsign_response_length + HD_extra_torsion - (int)sig->backtracking, NWORDS_ORDER);
@@ -244,18 +251,16 @@ protocols_verify(signature_t *sig, const public_key_t *pk, const unsigned char *
 {
     int verify;
 
-    fprintf(stderr, "[VERIFY] enter two_resp_length=%d backtracking=%d\n",
-        (int)sig->two_resp_length, (int)sig->backtracking);
-    fflush(stderr);
-
-    if (!check_canonical_basis_change_matrix(sig))
+    /* Length fields are attacker controlled.  Check each subtraction before
+     * it is used by a shift, doubling loop, or isogeny-length calculation. */
+    if ((int)sig->backtracking > SQIsign_response_length ||
+        (int)sig->two_resp_length > SQIsign_response_length - (int)sig->backtracking)
         return 0;
 
     // Computation of the length of the dim 2 2^n isogeny
     int pow_dim2_deg_resp = SQIsign_response_length - (int)sig->two_resp_length - (int)sig->backtracking;
 
-    // basic sanity test: checking that the response is not too long
-    if (pow_dim2_deg_resp < 0)
+    if (!check_canonical_basis_change_matrix(sig))
         return 0;
     // The dim 2 isogeny embeds a dim 1 isogeny of odd degree, so it can
     // never be of length 2.

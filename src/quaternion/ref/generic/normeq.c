@@ -1,4 +1,5 @@
 #include <quaternion.h>
+
 #include "internal.h"
 
 /** @file
@@ -18,7 +19,7 @@
 static int
 quat_alg_nrd_N2_divides(const quat_alg_elem_t *x, const ibz_t *N, const quat_alg_t *alg)
 {
-    int result;
+    int result = 0;
     ibz_t q[4], r[4], sq, acc, tmp, R_div_N, rem;
     for (int i = 0; i < 4; i++) {
         ibz_init(&q[i]);
@@ -29,6 +30,11 @@ quat_alg_nrd_N2_divides(const quat_alg_elem_t *x, const ibz_t *N, const quat_alg
     ibz_init(&tmp);
     ibz_init(&R_div_N);
     ibz_init(&rem);
+
+    if (ibz_cmp(N, &ibz_const_zero) <= 0) {
+        result = -1;
+        goto cleanup;
+    }
 
     for (int i = 0; i < 4; i++) {
         ibz_mul(&sq, &(x->coord[i]), &(x->coord[i]));   /* 2*log2(N) bit transient */
@@ -49,16 +55,17 @@ quat_alg_nrd_N2_divides(const quat_alg_elem_t *x, const ibz_t *N, const quat_alg
     ibz_mul(&tmp, &tmp, &(alg->p));
     ibz_add(&R_div_N, &R_div_N, &tmp);                  /* R_div_N = R */
     ibz_div(&R_div_N, &rem, &R_div_N, N);               /* R / N (rem should be 0) */
+    if (!ibz_is_zero(&rem)) {
+        result = -1;
+        goto cleanup;
+    }
 
     /* nrd/N = Q + R/N; check (nrd/N) mod N == 0 */
     ibz_add(&acc, &acc, &R_div_N);
     ibz_mod(&acc, &acc, N);
     result = ibz_is_zero(&acc);
 
-    fprintf(stderr, "[NRD-N2] N=%d (nrd/N mod N).bits=%d N2divides=%d\n",
-        ibz_bitsize(N), ibz_bitsize(&acc), result);
-    fflush(stderr);
-
+cleanup:
     for (int i = 0; i < 4; i++) {
         ibz_finalize(&q[i]);
         ibz_finalize(&r[i]);
@@ -147,7 +154,10 @@ quat_represent_integer(quat_alg_elem_t *gamma,
                        const quat_represent_integer_params_t *params)
 {
 
-    if (ibz_is_even(n_gamma)) {
+    if (params == NULL || params->order == NULL || params->algebra == NULL ||
+        params->order->q <= 0 || params->primality_test_iterations <= 0 ||
+        ibz_cmp(&params->algebra->p, &ibz_const_zero) <= 0 ||
+        ibz_cmp(n_gamma, &ibz_const_zero) <= 0 || ibz_is_even(n_gamma)) {
         return 0;
     }
     // var dec
@@ -155,12 +165,12 @@ quat_represent_integer(quat_alg_elem_t *gamma,
     ibz_t cornacchia_target;
     ibz_t adjusted_n_gamma, q;
     ibz_t bound, sq_bound, temp;
-    ibz_t test;
+    ibz_t test, counter;
     ibz_vec_4_t coeffs; // coeffs = [x,y,z,t]
     quat_alg_elem_t quat_temp;
 
-    if (non_diag)
-        assert(params->order->q % 4 == 1);
+    if (non_diag && params->order->q % 4 != 1)
+        return 0;
 
     // var init
     found = 0;
@@ -173,6 +183,7 @@ quat_represent_integer(quat_alg_elem_t *gamma,
     quat_alg_elem_init(&quat_temp);
     ibz_init(&adjusted_n_gamma);
     ibz_init(&cornacchia_target);
+    ibz_init(&counter);
 
     ibz_set(&q, params->order->q);
 
@@ -190,11 +201,11 @@ quat_represent_integer(quat_alg_elem_t *gamma,
     ibz_div(&sq_bound, &bound, &adjusted_n_gamma, &((params->algebra)->p));
     ibz_set(&temp, params->order->q);
     ibz_sub(&sq_bound, &sq_bound, &temp);
+    if (ibz_cmp(&sq_bound, &ibz_const_zero) < 0)
+        goto cleanup;
     ibz_sqrt_floor(&bound, &sq_bound);
 
     // the size of the search space is roughly n_gamma / (p√q)
-    ibz_t counter;
-    ibz_init(&counter);
     ibz_mul(&temp, &temp, &((params->algebra)->p));
     ibz_mul(&temp, &temp, &((params->algebra)->p));
     ibz_sqrt_floor(&temp, &temp);
@@ -206,7 +217,8 @@ quat_represent_integer(quat_alg_elem_t *gamma,
         ibz_sub(&counter, &counter, &ibz_const_one);
 
         // we start by sampling the first coordinate
-        ibz_rand_interval(&coeffs[2], &ibz_const_one, &bound);
+        if (!ibz_rand_interval(&coeffs[2], &ibz_const_one, &bound))
+            goto cleanup;
 
         // then, we sample the second coordinate
         // computing the second bound in temp as sqrt( (adjust_n_gamma - p*coeffs[2]²)/qp )
@@ -214,14 +226,19 @@ quat_represent_integer(quat_alg_elem_t *gamma,
         ibz_mul(&temp, &cornacchia_target, &(params->algebra->p));
         ibz_sub(&temp, &adjusted_n_gamma, &temp);
         ibz_mul(&sq_bound, &q, &(params->algebra->p));
+        if (ibz_cmp(&sq_bound, &ibz_const_zero) <= 0)
+            goto cleanup;
         ibz_div(&temp, &sq_bound, &temp, &sq_bound);
+        if (ibz_cmp(&temp, &ibz_const_zero) < 0)
+            continue;
         ibz_sqrt_floor(&temp, &temp);
 
         if (ibz_cmp(&temp, &ibz_const_zero) == 0) {
             continue;
         }
         // sampling the second value
-        ibz_rand_interval(&coeffs[3], &ibz_const_one, &temp);
+        if (!ibz_rand_interval(&coeffs[3], &ibz_const_one, &temp))
+            goto cleanup;
 
         // compute cornacchia_target = n_gamma - p * (z² + q*t²)
         ibz_mul(&temp, &coeffs[3], &coeffs[3]);
@@ -229,7 +246,8 @@ quat_represent_integer(quat_alg_elem_t *gamma,
         ibz_add(&cornacchia_target, &cornacchia_target, &temp);
         ibz_mul(&cornacchia_target, &cornacchia_target, &((params->algebra)->p));
         ibz_sub(&cornacchia_target, &adjusted_n_gamma, &cornacchia_target);
-        assert(ibz_cmp(&cornacchia_target, &ibz_const_zero) > 0);
+        if (ibz_cmp(&cornacchia_target, &ibz_const_zero) <= 0)
+            continue;
 
         // applying cornacchia
         if (ibz_probab_prime(&cornacchia_target, params->primality_test_iterations))
@@ -283,7 +301,11 @@ quat_represent_integer(quat_alg_elem_t *gamma,
 #endif
             // making gamma primitive
             // coeffs contains the coefficients of primitivized gamma in the basis of order
-            quat_alg_make_primitive(&coeffs, &temp, gamma, &((params->order)->order));
+            if (!quat_alg_make_primitive(
+                    &coeffs, &temp, gamma, &((params->order)->order))) {
+                found = 0;
+                continue;
+            }
 
             if (non_diag || standard_order)
                 found = (ibz_cmp(&temp, &ibz_const_two) == 0);
@@ -301,6 +323,7 @@ quat_represent_integer(quat_alg_elem_t *gamma,
         ibz_copy(&gamma->coord[3], &coeffs[3]);
         ibz_copy(&gamma->denom, &(((params->order)->order).denom));
     }
+cleanup:
     // var finalize
     ibz_finalize(&counter);
     ibz_finalize(&bound);
@@ -333,6 +356,15 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
     ibz_init(&disc);
     quat_alg_elem_init(&gen);
     quat_alg_elem_init(&gen_rerand);
+    quat_random_ideal_status_t status = QUAT_RANDOM_IDEAL_RETRY;
+
+    if (lideal == NULL || norm == NULL || params == NULL ||
+        params->order == NULL || params->algebra == NULL ||
+        params->primality_test_iterations <= 0 ||
+        ibz_cmp(norm, &ibz_const_one) <= 0) {
+        status = QUAT_RANDOM_IDEAL_FATAL;
+        goto cleanup;
+    }
 
     // when the norm is prime we can be quite efficient
     // by avoiding to run represent integer
@@ -345,12 +377,19 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
             // generating a trace-zero element at random
             ibz_set(&gen.coord[0], 0);
             ibz_sub(&n_temp, norm, &ibz_const_one);
-            for (int i = 1; i < 4; i++)
-                ibz_rand_interval(&gen.coord[i], &ibz_const_zero, &n_temp);
+            for (int i = 1; i < 4; i++) {
+                if (!ibz_rand_interval(&gen.coord[i], &ibz_const_zero, &n_temp)) {
+                    status = QUAT_RANDOM_IDEAL_FATAL;
+                    goto cleanup;
+                }
+            }
 
             // paper Issue 14: compute (-nrd(γ)) mod N modularly so max
             // ibz transient stays <= 2*log2(N) (vs full nrd ~ p*N^2).
-            quat_alg_norm_mod(&n_temp, &gen, norm, (params->algebra));
+            if (!quat_alg_norm_mod(&n_temp, &gen, norm, (params->algebra))) {
+                status = QUAT_RANDOM_IDEAL_FATAL;
+                goto cleanup;
+            }
 
             ibz_neg(&disc, &n_temp);
             ibz_mod(&disc, &disc, norm);
@@ -364,7 +403,13 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
             // decomposes nrd = N*Q + R and checks (Q + R/N) mod N == 0,
             // keeping max transient at 2*log2(N) (paper Lemma 4N^2).
             if (found) {
-                if (quat_alg_nrd_N2_divides(&gen, norm, (params->algebra)))
+                int n2_divides = quat_alg_nrd_N2_divides(
+                    &gen, norm, (params->algebra));
+                if (n2_divides < 0) {
+                    status = QUAT_RANDOM_IDEAL_FATAL;
+                    goto cleanup;
+                }
+                if (n2_divides)
                     found = 0;
             }
         }
@@ -382,25 +427,46 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
             // paper Issue 14: norm-mod kept under 2*log2(N) instead of p*N^2
             while (!beta_ok) {
                 ibz_sub(&n_temp, norm, &ibz_const_one);
-                for (int i = 0; i < 4; i++)
-                    ibz_rand_interval(&gen_rerand.coord[i], &ibz_const_zero, &n_temp);
-                quat_alg_norm_mod(&beta_nrd, &gen_rerand, norm, (params->algebra));
+                for (int i = 0; i < 4; i++) {
+                    if (!ibz_rand_interval(
+                            &gen_rerand.coord[i], &ibz_const_zero, &n_temp)) {
+                        status = QUAT_RANDOM_IDEAL_FATAL;
+                        ibz_finalize(&beta_nrd);
+                        ibz_finalize(&beta_nrd_d);
+                        goto cleanup;
+                    }
+                }
+                if (!quat_alg_norm_mod(
+                        &beta_nrd, &gen_rerand, norm, (params->algebra))) {
+                    status = QUAT_RANDOM_IDEAL_FATAL;
+                    ibz_finalize(&beta_nrd);
+                    ibz_finalize(&beta_nrd_d);
+                    goto cleanup;
+                }
                 beta_ok = (ibz_cmp(&beta_nrd, &ibz_const_zero) != 0);
             }
 
             // paper Issue 14: g = gamma*beta computed mod N*O_0 directly
             // (paper Algorithm RandomIdealGivenPrimeNorm line 59), so coord
             // intermediates stay within paper Lemma 4N^2 bound.
-            quat_alg_mul_mod(&gen, &gen, &gen_rerand, norm, (params->algebra));
+            if (!quat_alg_mul_mod(
+                    &gen, &gen, &gen_rerand, norm, (params->algebra))) {
+                status = QUAT_RANDOM_IDEAL_FATAL;
+                ibz_finalize(&beta_nrd);
+                ibz_finalize(&beta_nrd_d);
+                goto cleanup;
+            }
 
             ibz_finalize(&beta_nrd);
             ibz_finalize(&beta_nrd_d);
         }
     } else {
-        assert(prime_cofactor != NULL);
+        if (prime_cofactor == NULL || ibz_is_zero(norm)) {
+            status = QUAT_RANDOM_IDEAL_FATAL;
+            goto cleanup;
+        }
         // if it is not prime or we don't know if it is prime, we may just use represent integer
         // and use a precomputed prime as cofactor
-        assert(!ibz_is_zero(norm));
         ibz_mul(&n_temp, prime_cofactor, norm);
         found = quat_represent_integer(&gen, &n_temp, 0, params);
         found = found && !quat_alg_elem_is_zero(&gen);
@@ -435,16 +501,17 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
     // paper Issue 9: norm = caller-supplied N (RandomIdealGivenPrimeNorm
     // guarantees nrd(ideal) = N via Lemma nrd-mod). Skip quat_alg_norm(gen)
     // which produces a ~2*N + p_bits transient (~1275 bit at lvl1 commit).
-    quat_random_ideal_status_t status = QUAT_RANDOM_IDEAL_RETRY;
     if (found) {
         status = quat_lideal_create_with_norm(
                      lideal, &gen, norm, &((params->order)->order), (params->algebra))
                      ? QUAT_RANDOM_IDEAL_SUCCESS
                      : QUAT_RANDOM_IDEAL_FATAL;
     }
-    assert(status != QUAT_RANDOM_IDEAL_SUCCESS ||
-           ibz_cmp(norm, &(lideal->norm)) == 0);
+    if (status == QUAT_RANDOM_IDEAL_SUCCESS &&
+        ibz_cmp(norm, &(lideal->norm)) != 0)
+        status = QUAT_RANDOM_IDEAL_FATAL;
 
+cleanup:
     ibz_finalize(&n_temp);
     quat_alg_elem_finalize(&gen);
     quat_alg_elem_finalize(&gen_rerand);
@@ -453,11 +520,11 @@ quat_sampling_random_ideal_O0_given_norm(quat_left_ideal_t *lideal,
     return status;
 }
 
-void
+int
 quat_change_to_O0_basis(ibz_vec_4_t *vec, const quat_alg_elem_t *el)
 {
-    ibz_t tmp;
-    ibz_init(&tmp);
+    if (ibz_is_zero(&el->denom))
+        return 0;
     ibz_copy(&(*vec)[2], &el->coord[2]);
     ibz_add(&(*vec)[2], &(*vec)[2], &(*vec)[2]); // double (not optimal if el->denom is even...)
     ibz_copy(&(*vec)[3], &el->coord[3]);         // double (not optimal if el->denom is even...)
@@ -465,15 +532,5 @@ quat_change_to_O0_basis(ibz_vec_4_t *vec, const quat_alg_elem_t *el)
     ibz_sub(&(*vec)[0], &el->coord[0], &el->coord[3]);
     ibz_sub(&(*vec)[1], &el->coord[1], &el->coord[2]);
 
-    assert(ibz_divides(&(*vec)[0], &el->denom));
-    assert(ibz_divides(&(*vec)[1], &el->denom));
-    assert(ibz_divides(&(*vec)[2], &el->denom));
-    assert(ibz_divides(&(*vec)[3], &el->denom));
-
-    ibz_div(&(*vec)[0], &tmp, &(*vec)[0], &el->denom);
-    ibz_div(&(*vec)[1], &tmp, &(*vec)[1], &el->denom);
-    ibz_div(&(*vec)[2], &tmp, &(*vec)[2], &el->denom);
-    ibz_div(&(*vec)[3], &tmp, &(*vec)[3], &el->denom);
-
-    ibz_finalize(&tmp);
+    return ibz_vec_4_scalar_div(vec, &el->denom, vec);
 }

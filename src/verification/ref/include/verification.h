@@ -95,8 +95,9 @@ void signature_to_bytes(unsigned char *enc, const signature_t *sig);
  *
  * @param sig : Structure to decode the signature in
  * @param enc : Byte array to decode
+ * @returns 1 on success, 0 if an encoded field element is non-canonical
  */
-void signature_from_bytes(signature_t *sig, const unsigned char *enc);
+int signature_from_bytes(signature_t *sig, const unsigned char *enc);
 
 /**
  * @brief Encodes a public key as a byte array
@@ -111,6 +112,8 @@ unsigned char *public_key_to_bytes(unsigned char *enc, const public_key_t *pk);
  *
  * @param pk : Structure to decode the public key in
  * @param enc : Byte array to decode
+ * @returns A pointer past the decoded key on success, NULL if an encoded
+ * field element is non-canonical
  */
 const unsigned char *public_key_from_bytes(public_key_t *pk, const unsigned char *enc);
 

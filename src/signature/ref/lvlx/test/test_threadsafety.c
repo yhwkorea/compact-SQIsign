@@ -1,6 +1,6 @@
 #include <inttypes.h>
 #include <stdio.h>
-#include <assert.h>
+#include <stdlib.h>
 
 #include <verification.h>
 #include <signature.h>
@@ -30,12 +30,12 @@ test_sqisign(void *_)
     secret_key_init(&sk);
 
     for (int i = 0; i < iterations; ++i) {
-        protocols_keygen(&pk, &sk);
-        int scheck = protocols_sign(&sig, &pk, &sk, msg, sizeof(msg) / sizeof(*msg));
-        int check = protocols_verify(&sig, &pk, msg, sizeof(msg) / sizeof(*msg));
-        assert(scheck);
-        assert(check);
-        res = res && scheck && check;
+        if (!protocols_keygen(&pk, &sk) ||
+            !protocols_sign(&sig, &pk, &sk, msg, sizeof(msg) / sizeof(*msg)) ||
+            !protocols_verify(&sig, &pk, msg, sizeof(msg) / sizeof(*msg))) {
+            res = false;
+            break;
+        }
     }
 
     public_key_finalize(&pk);
@@ -98,23 +98,46 @@ main(int argc, char *argv[])
 
     randombytes_init((unsigned char *)seed, NULL, 256);
 
-    pthread_t thread_handles[threads];
+    pthread_t *thread_handles = calloc((size_t)threads, sizeof(*thread_handles));
+    if (thread_handles == NULL) {
+        fprintf(stderr, "unable to allocate thread handles\n");
+        return 1;
+    }
 
-    {
-        pthread_attr_t attr;
-        pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, 8 << 20); // 8 MB
-        for (int i = 0; i < threads; ++i)
-            pthread_create(&thread_handles[i], &attr, &test_sqisign, NULL);
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        fprintf(stderr, "unable to configure worker stack\n");
+        free(thread_handles);
+        return 1;
+    }
+    if (pthread_attr_setstacksize(&attr, 8u * 1024u * 1024u) != 0) {
+        fprintf(stderr, "unable to configure worker stack\n");
         pthread_attr_destroy(&attr);
+        free(thread_handles);
+        return 1;
     }
 
-    bool ok = true;
-    for (int i = 0; i < threads; ++i) {
-        void *res;
-        pthread_join(thread_handles[i], &res);
-        ok = ok && res;
+    /* The implementation currently requires the documented enlarged stack. */
+    int created = 0;
+    for (; created < threads; ++created) {
+        if (pthread_create(&thread_handles[created], &attr, &test_sqisign, NULL) != 0) {
+            fprintf(stderr, "pthread_create failed at worker %d\n", created);
+            break;
+        }
     }
+    pthread_attr_destroy(&attr);
+
+    bool ok = created == threads;
+    for (int i = 0; i < created; ++i) {
+        void *worker_result = NULL;
+        if (pthread_join(thread_handles[i], &worker_result) != 0) {
+            fprintf(stderr, "pthread_join failed at worker %d\n", i);
+            ok = false;
+        } else {
+            ok = ok && worker_result != NULL;
+        }
+    }
+    free(thread_handles);
 
     if (!ok) {
         printf("\nSome tests failed!\n");

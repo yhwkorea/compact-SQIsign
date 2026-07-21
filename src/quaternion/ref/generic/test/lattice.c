@@ -182,10 +182,11 @@ int
 quat_test_lattice_dual_without_hnf(void)
 {
     int res = 0;
-    quat_lattice_t lat, dual, cmp;
+    quat_lattice_t lat, dual, cmp, before;
     quat_lattice_init(&lat);
     quat_lattice_init(&dual);
     quat_lattice_init(&cmp);
+    quat_lattice_init(&before);
     // set lattice
     ibz_mat_4x4_zero(&(lat.basis));
     ibz_set(&(lat.basis[0][0]), 1);
@@ -212,12 +213,22 @@ quat_test_lattice_dual_without_hnf(void)
     quat_lattice_hnf(&dual);
     res = res || !quat_lattice_equal(&dual, &lat);
 
+    /* A zero denominator is not a lattice representation.  Failure must not
+     * publish a pseudo-dual or otherwise modify the destination. */
+    ibz_mat_4x4_copy(&before.basis, &dual.basis);
+    ibz_copy(&before.denom, &dual.denom);
+    ibz_set(&lat.denom, 0);
+    res = res || quat_lattice_dual_without_hnf(&dual, &lat);
+    res = res || !ibz_mat_4x4_equal(&dual.basis, &before.basis);
+    res = res || ibz_cmp(&dual.denom, &before.denom);
+
     if (res != 0) {
         printf("Quaternion unit test lattice_dual_without_hnf failed\n");
     }
     quat_lattice_finalize(&lat);
     quat_lattice_finalize(&dual);
     quat_lattice_finalize(&cmp);
+    quat_lattice_finalize(&before);
     return (res);
 }
 
@@ -254,9 +265,8 @@ quat_test_lattice_add(void)
     ibz_set(&(lat2.denom), 6);
     ibz_set(&(cmp.denom), 12);
 
-    quat_lattice_add(&sum, &lat1, &lat2);
-    res = res || (!ibz_mat_4x4_equal(&(sum.basis), &(cmp.basis)));
-    res = res || ibz_cmp(&(sum.denom), &(cmp.denom));
+    res = res || !quat_lattice_add(&sum, &lat1, &lat2);
+    res = res || !quat_lattice_equal(&sum, &cmp);
 
     // same lattices but not under hnf
     ibz_mat_4x4_zero(&(lat1.basis));
@@ -275,17 +285,15 @@ quat_test_lattice_add(void)
     ibz_set(&(lat1.denom), 4);
     ibz_set(&(lat2.denom), 6);
 
-    quat_lattice_add(&sum, &lat1, &lat2);
-    res = res || (!ibz_mat_4x4_equal(&(sum.basis), &(cmp.basis)));
-    res = res || ibz_cmp(&(sum.denom), &(cmp.denom));
+    res = res || !quat_lattice_add(&sum, &lat1, &lat2);
+    res = res || !quat_lattice_equal(&sum, &cmp);
 
     // double in place gives hnf
     ibz_mat_4x4_copy(&(cmp.basis), &lat2.basis);
     ibz_copy(&(cmp.denom), &(lat2.denom));
-    quat_lattice_hnf(&cmp);
-    quat_lattice_add(&lat2, &lat2, &lat2);
-    res = res || (!ibz_mat_4x4_equal(&(lat2.basis), &(cmp.basis)));
-    res = res || ibz_cmp(&(lat2.denom), &(cmp.denom));
+    res = res || !quat_lattice_hnf(&cmp);
+    res = res || !quat_lattice_add(&lat2, &lat2, &lat2);
+    res = res || !quat_lattice_equal(&lat2, &cmp);
 
     if (res != 0) {
         printf("Quaternion unit test lattice_add failed\n");
@@ -696,6 +704,17 @@ quat_test_lattice_index(void)
     quat_lattice_index(&index, &sublat, &overlat);
 
     res = res || !(ibz_cmp_int32(&index, 8) == 0);
+
+    /* Invalid zero-denominator inputs must fail without replacing a caller's
+     * previous result with the spurious index zero. */
+    ibz_set(&index, 73);
+    ibz_set(&overlat.denom, 0);
+    res = res || quat_lattice_index(&index, &sublat, &overlat);
+    res = res || ibz_cmp_int32(&index, 73);
+    ibz_set(&overlat.denom, 2);
+    ibz_set(&sublat.denom, 0);
+    res = res || quat_lattice_index(&index, &sublat, &overlat);
+    res = res || ibz_cmp_int32(&index, 73);
 
     if (res != 0) {
         printf("Quaternion unit test lattice_index failed\n");
