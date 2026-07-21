@@ -14,7 +14,6 @@ at NIST levels I/III/V.
 | OS | WSL2 Ubuntu, kernel `6.6.114.1-microsoft-standard-WSL2` |
 | Compiler | GCC 11.4.0 (Ubuntu `11.4.0-1ubuntu1~22.04.3`) |
 | Build | `cmake -DSQISIGN_BUILD_TYPE=broadwell -DCMAKE_BUILD_TYPE=Release` |
-| Stack | `ulimit -s unlimited` at run time |
 
 ## Precision
 

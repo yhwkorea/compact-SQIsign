@@ -117,7 +117,6 @@ main(int argc, char *argv[])
         return 1;
     }
 
-    /* The implementation currently requires the documented enlarged stack. */
     int created = 0;
     for (; created < threads; ++created) {
         if (pthread_create(&thread_handles[created], &attr, &test_sqisign, NULL) != 0) {

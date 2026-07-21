@@ -716,10 +716,8 @@ find_uv(ibz_t *u,
     int m = FINDUV_box_size;
     int m4 = FINDUV_cube_size;
 
-    /* These tables grow with both the fixed-precision limb count and the
-     * enumeration cube.  Keeping them as VLAs exhausted the default process
-     * stack at levels 3 and 5.  Store the working set on the heap instead;
-     * the two former alternate_* tables were never read. */
+    /* Allocate the fixed-precision enumeration tables dynamically.  The two
+     * former alternate_* tables were never read. */
     size_t order_count = (size_t)num_alternate_order + 1;
     size_t cube_count = (size_t)m4;
     size_t entry_count;

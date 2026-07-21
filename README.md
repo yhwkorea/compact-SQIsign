@@ -28,7 +28,6 @@ It is not necessary to execute these scripts to compile the project.
 mkdir -p build
 cmake -B build -DSQISIGN_BUILD_TYPE=broadwell -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-ulimit -s unlimited
 ```
 
 `SQISIGN_BUILD_TYPE` accepts:
@@ -40,8 +39,7 @@ ulimit -s unlimited
 | `broadwell` | AVX2/BMI2 path for the finite-field arithmetic; default for the bench results below |
 
 `CMAKE_BUILD_TYPE=Release` strips assertions (`-DNDEBUG`) and is required for
-representative timing. Stack must be unlimited (`ulimit -s unlimited`) for the
-higher NIST levels.
+representative timing.
 
 ### Build options
 
@@ -128,7 +126,6 @@ procedure to reproduce those numbers from a clean clone.
 | OS | WSL2 Ubuntu, kernel `6.6.114.1-microsoft-standard-WSL2` |
 | Compiler | GCC 11.4.0 |
 | Build | `cmake -DSQISIGN_BUILD_TYPE=broadwell -DCMAKE_BUILD_TYPE=Release` |
-| Stack | `ulimit -s unlimited` |
 
 ### Step 1. Build both implementations
 
