@@ -117,10 +117,15 @@ ctz64(uint64_t x)
 #endif
 }
 
-// 64x64 -> 128 bit multiplication without __int128
+// 64x64 -> 128 bit multiplication, with a portable 32-bit-half fallback
 static void
 mul64_128(uint64_t a, uint64_t b, uint64_t *hi, uint64_t *lo)
 {
+#if defined(HAVE_UINT128)
+    __uint128_t product = (__uint128_t)a * b;
+    *lo = (uint64_t)product;
+    *hi = (uint64_t)(product >> 64);
+#else
     uint32_t a_lo = (uint32_t)a;
     uint32_t a_hi = (uint32_t)(a >> 32);
     uint32_t b_lo = (uint32_t)b;
@@ -137,7 +142,216 @@ mul64_128(uint64_t a, uint64_t b, uint64_t *hi, uint64_t *lo)
     *lo = p00 + (middle << 32);
     carry += (*lo < p00) ? 1 : 0;
     *hi = p11 + (middle >> 32) + carry;
+#endif
 }
+
+static size_t
+ibz_used_limbs(const uint64_t *value, size_t capacity)
+{
+    while (capacity > 0 && value[capacity - 1] == 0)
+        --capacity;
+    return capacity;
+}
+
+/* Full unsigned product.  The output capacity is exactly twice the fixed
+ * precision, which is also enough for two maximum-width magnitudes. */
+static void
+ibz_mul_unsigned_wide(uint64_t product[2 * IBZ_LIMBS],
+                      const uint64_t *a,
+                      size_t a_size,
+                      const uint64_t *b,
+                      size_t b_size)
+{
+    memset(product, 0, 2 * IBZ_LIMBS * sizeof(*product));
+
+    for (size_t i = 0; i < a_size; ++i) {
+        if (a[i] == 0)
+            continue;
+
+#if defined(HAVE_UINT128)
+        uint64_t carry = 0;
+        for (size_t j = 0; j < b_size; ++j) {
+            const size_t index = i + j;
+            __uint128_t accumulator = (__uint128_t)a[i] * b[j] +
+                                      product[index] + carry;
+            product[index] = (uint64_t)accumulator;
+            carry = (uint64_t)(accumulator >> 64);
+        }
+
+        size_t index = i + b_size;
+        while (carry != 0 && index < 2 * IBZ_LIMBS) {
+            __uint128_t accumulator = (__uint128_t)product[index] + carry;
+            product[index] = (uint64_t)accumulator;
+            carry = (uint64_t)(accumulator >> 64);
+            ++index;
+        }
+#else
+        for (size_t j = 0; j < b_size; ++j) {
+            if (b[j] == 0)
+                continue;
+
+            const size_t index = i + j;
+            uint64_t hi, lo;
+            mul64_128(a[i], b[j], &hi, &lo);
+
+            uint64_t old = product[index];
+            product[index] = old + lo;
+            uint64_t carry = product[index] < old;
+
+            size_t k = index + 1;
+            if (k < 2 * IBZ_LIMBS) {
+                old = product[k];
+                product[k] = old + hi;
+                uint64_t next_carry = product[k] < old;
+                old = product[k];
+                product[k] = old + carry;
+                next_carry |= product[k] < old;
+                carry = next_carry;
+                ++k;
+
+                while (carry != 0 && k < 2 * IBZ_LIMBS) {
+                    old = product[k];
+                    product[k] = old + 1;
+                    carry = product[k] == 0;
+                    ++k;
+                }
+            }
+        }
+#endif
+    }
+}
+
+#if defined(HAVE_UINT128)
+/* Knuth-style normalized long division in base 2^64.  The dividend may be a
+ * regular fixed-width value or a full 2N-limb multiplication result.  Only
+ * the remainder is required by wide modular multiplication, so quotient may
+ * be NULL. */
+static void
+ibz_divrem_unsigned_wide(uint64_t quotient[2 * IBZ_LIMBS],
+                         uint64_t remainder[IBZ_LIMBS],
+                         const uint64_t *dividend,
+                         size_t dividend_capacity,
+                         const uint64_t divisor[IBZ_LIMBS])
+{
+    uint64_t u[2 * IBZ_LIMBS + 1];
+    uint64_t v[IBZ_LIMBS];
+    const size_t dividend_size = ibz_used_limbs(dividend, dividend_capacity);
+    const size_t divisor_size = ibz_used_limbs(divisor, IBZ_LIMBS);
+
+    if (divisor_size == 0)
+        ibz_division_by_zero_abort("division");
+
+    if (quotient != NULL)
+        memset(quotient, 0, 2 * IBZ_LIMBS * sizeof(*quotient));
+    memset(remainder, 0, IBZ_LIMBS * sizeof(*remainder));
+
+    if (dividend_size == 0)
+        return;
+    if (dividend_size < divisor_size) {
+        memcpy(remainder, dividend, dividend_size * sizeof(*remainder));
+        return;
+    }
+
+    if (divisor_size == 1) {
+        uint64_t carry = 0;
+        for (size_t i = dividend_size; i-- > 0;) {
+            __uint128_t numerator = ((__uint128_t)carry << 64) | dividend[i];
+            if (quotient != NULL)
+                quotient[i] = (uint64_t)(numerator / divisor[0]);
+            carry = (uint64_t)(numerator % divisor[0]);
+        }
+        remainder[0] = carry;
+        return;
+    }
+
+    memset(u, 0, sizeof(u));
+    memset(v, 0, sizeof(v));
+
+    const unsigned int normalization = (unsigned int)clz64(divisor[divisor_size - 1]);
+    if (normalization == 0) {
+        memcpy(v, divisor, divisor_size * sizeof(*v));
+        memcpy(u, dividend, dividend_size * sizeof(*u));
+    } else {
+        uint64_t carry = 0;
+        for (size_t i = 0; i < divisor_size; ++i) {
+            const uint64_t limb = divisor[i];
+            v[i] = (limb << normalization) | carry;
+            carry = limb >> (64 - normalization);
+        }
+
+        carry = 0;
+        for (size_t i = 0; i < dividend_size; ++i) {
+            const uint64_t limb = dividend[i];
+            u[i] = (limb << normalization) | carry;
+            carry = limb >> (64 - normalization);
+        }
+        u[dividend_size] = carry;
+    }
+
+    const size_t quotient_size = dividend_size - divisor_size + 1;
+    const uint64_t divisor_top = v[divisor_size - 1];
+    for (size_t position = quotient_size; position-- > 0;) {
+        const size_t top = position + divisor_size;
+        uint64_t qhat;
+        uint64_t rhat;
+        int rhat_overflow = 0;
+
+        if (u[top] >= divisor_top) {
+            qhat = UINT64_MAX;
+            __uint128_t sum = (__uint128_t)u[top - 1] + divisor_top;
+            rhat = (uint64_t)sum;
+            rhat_overflow = (int)(sum >> 64);
+        } else {
+            __uint128_t numerator = ((__uint128_t)u[top] << 64) | u[top - 1];
+            qhat = (uint64_t)(numerator / divisor_top);
+            rhat = (uint64_t)(numerator % divisor_top);
+        }
+
+        while (!rhat_overflow &&
+               (__uint128_t)qhat * v[divisor_size - 2] >
+                   ((__uint128_t)rhat << 64) + u[top - 2]) {
+            --qhat;
+            __uint128_t sum = (__uint128_t)rhat + divisor_top;
+            rhat = (uint64_t)sum;
+            rhat_overflow = (int)(sum >> 64);
+        }
+
+        uint64_t borrow = 0;
+        for (size_t i = 0; i < divisor_size; ++i) {
+            __uint128_t subtrahend = (__uint128_t)qhat * v[i] + borrow;
+            const uint64_t low = (uint64_t)subtrahend;
+            const uint64_t high = (uint64_t)(subtrahend >> 64);
+            const uint64_t old = u[position + i];
+            u[position + i] = old - low;
+            borrow = high + (old < low);
+        }
+
+        const uint64_t old_top = u[top];
+        u[top] = old_top - borrow;
+        if (old_top < borrow) {
+            --qhat;
+            uint64_t carry = 0;
+            for (size_t i = 0; i < divisor_size; ++i) {
+                __uint128_t sum = (__uint128_t)u[position + i] + v[i] + carry;
+                u[position + i] = (uint64_t)sum;
+                carry = (uint64_t)(sum >> 64);
+            }
+            u[top] += carry;
+        }
+
+        if (quotient != NULL)
+            quotient[position] = qhat;
+    }
+
+    if (normalization == 0) {
+        memcpy(remainder, u, divisor_size * sizeof(*remainder));
+    } else {
+        for (size_t i = 0; i < divisor_size; ++i)
+            remainder[i] = (u[i] >> normalization) |
+                           (u[i + 1] << (64 - normalization));
+    }
+}
+#endif
 
 // Initialize/finalize
 void
@@ -292,16 +506,29 @@ ibz_shift_left_unsigned(ibz_t *result, const ibz_t *a, uint32_t shift)
     }
 }
 
-/* Unsigned shift/subtract division.  Starting at the difference in bit
- * lengths avoids scanning the leading dividend bits that cannot contribute
- * to the quotient.  Inputs are copied so every output/input aliasing pattern
- * remains valid.  The caller must provide a nonzero divisor. */
+/* Unsigned fixed-width division.  Targets with 128-bit intermediates use
+ * normalized base-2^64 long division; the portable fallback uses aligned
+ * shift/subtract.  Both paths publish outputs only after consuming inputs, so
+ * every output/input aliasing pattern remains valid. */
 static void
 ibz_div_unsigned(ibz_t *quotient,
                  ibz_t *remainder,
                  const ibz_t *dividend,
                  const ibz_t *divisor)
 {
+#if defined(HAVE_UINT128)
+    uint64_t q_wide[2 * IBZ_LIMBS];
+    uint64_t r_words[IBZ_LIMBS];
+    ibz_divrem_unsigned_wide(quotient != NULL ? q_wide : NULL,
+                             r_words,
+                             *dividend,
+                             IBZ_LIMBS,
+                             *divisor);
+    if (quotient != NULL)
+        memcpy(*quotient, q_wide, sizeof(ibz_t));
+    if (remainder != NULL)
+        memcpy(*remainder, r_words, sizeof(ibz_t));
+#else
     ibz_t dividend_input, divisor_input, shifted_divisor, q, r;
     ibz_copy(&dividend_input, dividend);
     ibz_copy(&divisor_input, divisor);
@@ -327,6 +554,7 @@ ibz_div_unsigned(ibz_t *quotient,
         ibz_copy(quotient, &q);
     if (remainder)
         ibz_copy(remainder, &r);
+#endif
 }
 
 static uint32_t
@@ -348,6 +576,22 @@ ibz_div_unsigned_small(ibz_t *quotient, const ibz_t *dividend, uint32_t divisor)
     }
 
     ibz_copy(quotient, &q);
+    return (uint32_t)remainder;
+}
+
+static uint32_t
+ibz_mod_unsigned_small(const ibz_t *dividend, uint32_t divisor)
+{
+    uint64_t remainder = 0;
+    size_t size = ibz_used_limbs(*dividend, IBZ_LIMBS);
+
+    while (size-- > 0) {
+        uint64_t half = (remainder << 32) | ((*dividend)[size] >> 32);
+        remainder = half % divisor;
+        half = (remainder << 32) |
+               ((*dividend)[size] & UINT64_C(0xffffffff));
+        remainder = half % divisor;
+    }
     return (uint32_t)remainder;
 }
 
@@ -577,8 +821,8 @@ ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b)
     ibz_abs(&bb, B);
 
     // Find actual sizes on |a|, |b|
-    int a_size = IBZ_LIMBS;
-    int b_size = IBZ_LIMBS;
+    size_t a_size = IBZ_LIMBS;
+    size_t b_size = IBZ_LIMBS;
 
     while (a_size > 1 && aa[a_size - 1] == 0) a_size--;
     while (b_size > 1 && bb[b_size - 1] == 0) b_size--;
@@ -586,42 +830,7 @@ ibz_mul(ibz_t *prod, const ibz_t *a, const ibz_t *b)
     /* Per-call storage is required: a static buffer makes concurrent calls
      * race and corrupt otherwise independent multiplications. */
     uint64_t temp_result[2 * IBZ_LIMBS];
-    memset(temp_result, 0, sizeof(temp_result));
-
-    for (int i = 0; i < a_size; i++) {
-        uint64_t a_limb = aa[i];
-        if (a_limb == 0) continue;
-
-        for (int j = 0; j < b_size; j++) {
-            uint64_t b_limb = bb[j];
-            if (b_limb == 0) continue;
-
-            if (i + j >= 2 * IBZ_LIMBS) continue;
-
-            uint64_t hi, lo;
-            mul64_128(a_limb, b_limb, &hi, &lo);
-
-            int k = i + j;
-            temp_result[k] += lo;
-            uint64_t carry = (temp_result[k] < lo) ? 1 : 0;
-
-            k++;
-            if (k < 2 * IBZ_LIMBS) {
-                temp_result[k] += hi;
-                uint64_t c2 = (temp_result[k] < hi) ? 1 : 0;
-                temp_result[k] += carry;
-                c2 += (temp_result[k] < carry) ? 1 : 0;
-                carry = c2;
-
-                k++;
-                while (carry && k < 2 * IBZ_LIMBS) {
-                    temp_result[k] += carry;
-                    carry = (temp_result[k] == 0) ? 1 : 0;
-                    k++;
-                }
-            }
-        }
-    }
+    ibz_mul_unsigned_wide(temp_result, aa, a_size, bb, b_size);
 
 #if defined(SQISIGN_INTBIG_OVERFLOW_CHECK)
     {
@@ -1368,6 +1577,7 @@ ibz_mod_positive_magnitude(ibz_t *r, const ibz_t *a, const ibz_t *modulus)
     ibz_copy(r, &reduced);
 }
 
+#if !defined(HAVE_UINT128)
 /* a,b are in [0, modulus); modulus is an unsigned positive magnitude. */
 static void
 ibz_add_mod_positive(ibz_t *sum,
@@ -1382,20 +1592,36 @@ ibz_add_mod_positive(ibz_t *sum,
     else
         ibz_add(sum, a, b);
 }
+#endif
 
-/* Overflow-free modular multiplication for fixed integers.
- *
- * Protocol-sized operands normally have enough headroom for the ordinary
- * product.  Keep that common path on the much faster limb multiplication and
- * division routines.  Only use bit-serial add-and-double when the unreduced
- * product may exceed the signed ibz_t capacity (the boundary case exercised
- * by the fixed-precision regression tests). */
+/* Overflow-free modular multiplication for fixed integers.  On 128-bit
+ * capable targets the complete 2N-limb product is reduced directly, so no
+ * high product limbs are lost at the fixed-width boundary.  The portable
+ * fallback retains add-and-double for products that do not fit. */
 static void
 ibz_mul_mod_positive(ibz_t *product,
                      const ibz_t *a,
                      const ibz_t *b,
                      const ibz_t *modulus)
 {
+#if defined(HAVE_UINT128)
+    const size_t a_size = ibz_used_limbs(*a, IBZ_LIMBS);
+    const size_t b_size = ibz_used_limbs(*b, IBZ_LIMBS);
+    if (a_size == 0 || b_size == 0) {
+        ibz_init(product);
+        return;
+    }
+
+    uint64_t wide_product[2 * IBZ_LIMBS];
+    uint64_t reduced[IBZ_LIMBS];
+    ibz_mul_unsigned_wide(wide_product, *a, a_size, *b, b_size);
+    ibz_divrem_unsigned_wide(NULL,
+                             reduced,
+                             wide_product,
+                             a_size + b_size,
+                             *modulus);
+    memcpy(*product, reduced, sizeof(ibz_t));
+#else
     const int a_bits = ibz_bitsize_unsigned(a);
     const int b_bits = ibz_bitsize_unsigned(b);
     if (a_bits == 0 || b_bits == 0) {
@@ -1422,6 +1648,7 @@ ibz_mul_mod_positive(ibz_t *product,
             ibz_add_mod_positive(&addend, &addend, &addend, modulus);
     }
     ibz_copy(product, &result);
+#endif
 }
 
 // Power
@@ -1450,15 +1677,14 @@ ibz_mod_ui(const ibz_t *n, unsigned long d)
     if (d == 0)
         ibz_division_by_zero_abort("modulo");
 
-    ibz_t magnitude, quotient;
+    ibz_t magnitude;
     ibz_abs_unsigned(&magnitude, n);
 
-    /* This is the path used by primality trial division.  Dividing two
-     * 32-bit halves per limb is linear in the active fixed precision and is
-     * substantially cheaper than general shift/subtract division. */
+    /* This is the path used by primality trial division.  Reducing two
+     * 32-bit halves per active limb avoids constructing an unused quotient. */
     if (d <= UINT32_MAX) {
         unsigned long remainder =
-            (unsigned long)ibz_div_unsigned_small(&quotient, &magnitude, (uint32_t)d);
+            (unsigned long)ibz_mod_unsigned_small(&magnitude, (uint32_t)d);
         if (ibz_is_negative(n) && remainder != 0)
             remainder = d - remainder;
         return remainder;
@@ -1507,12 +1733,14 @@ ibz_probab_prime(const ibz_t *n, int reps)
             return 0;
     }
 
-    ibz_t n_minus_1, d, a, x, temp;
+    ibz_t n_minus_1, d, a, x;
     ibz_sub(&n_minus_1, n, (const ibz_t *)&ibz_const_one);
     ibz_copy(&d, &n_minus_1);
 
+    int s = 0;
     while (ibz_is_even(&d)) {
         ibz_div_2exp(&d, &d, 1);
+        ++s;
     }
 
     for (int i = 0; i < reps; i++) {
@@ -1529,9 +1757,8 @@ ibz_probab_prime(const ibz_t *n, int reps)
             continue;
         }
 
-        ibz_copy(&temp, &d);
         int composite = 1;
-        while (ibz_cmp(&temp, &n_minus_1) < 0) {
+        for (int round = 1; round < s; ++round) {
             ibz_mul_mod_positive(&x, &x, &x, n);
 
             if (ibz_is_one(&x)) {
@@ -1541,8 +1768,6 @@ ibz_probab_prime(const ibz_t *n, int reps)
                 composite = 0;
                 break;
             }
-
-            ibz_mul(&temp, &temp, (const ibz_t *)&ibz_const_two);
         }
 
         if (composite) {
@@ -1569,11 +1794,12 @@ ibz_pow_mod(ibz_t *pow, const ibz_t *x, const ibz_t *e, const ibz_t *m)
     ibz_set(&result, 1);
     ibz_div_unsigned(NULL, &result, &result, &modulus); /* 1 mod m */
 
-    while (!ibz_is_zero(&exp)) {
-        if (ibz_is_odd(&exp))
+    const int exponent_bits = ibz_bitsize_unsigned(&exp);
+    for (int bit = 0; bit < exponent_bits; ++bit) {
+        if ((exp[bit / 64] & (UINT64_C(1) << (bit % 64))) != 0)
             ibz_mul_mod_positive(&result, &result, &base, &modulus);
-        ibz_mul_mod_positive(&base, &base, &base, &modulus);
-        ibz_shift_right_unsigned(&exp, &exp, 1);
+        if (bit + 1 < exponent_bits)
+            ibz_mul_mod_positive(&base, &base, &base, &modulus);
     }
 
     ibz_copy(pow, &result);

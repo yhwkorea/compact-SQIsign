@@ -15,6 +15,17 @@ typedef struct {
     int failed;
 } ibz_mul_thread_arg_t;
 
+static uint64_t
+ibz_test_next_u64(uint64_t *state)
+{
+    uint64_t value = *state;
+    value ^= value << 13;
+    value ^= value >> 7;
+    value ^= value << 17;
+    *state = value;
+    return value;
+}
+
 static void *
 ibz_mul_thread_worker(void *opaque)
 {
@@ -424,6 +435,96 @@ ibz_test_fixed_precision_regressions(void)
     ibz_pow(&check, &max_value, 1);
     res |= ibz_cmp(&check, &max_value) != 0;
     if (res != section_res) printf("  modular power regression failed\n");
+
+    /* Exercise division over every active divisor length, all sign
+     * combinations, and the public input/output alias patterns. */
+    section_res = res;
+    {
+        uint64_t state = UINT64_C(0x6a09e667f3bcc909);
+        ibz_t dividend, divisor, signed_dividend, signed_divisor;
+        ibz_t quotient, remainder, alias_q, alias_r, abs_r, abs_d;
+
+        for (int iteration = 0; iteration < 4 * IBZ_LIMBS; ++iteration) {
+            for (size_t limb = 0; limb < IBZ_LIMBS; ++limb)
+                dividend[limb] = ibz_test_next_u64(&state);
+            dividend[IBZ_LIMBS - 1] &= UINT64_MAX >> 1;
+            dividend[IBZ_LIMBS - 1] |= UINT64_C(1) << 62;
+
+            const size_t divisor_limbs =
+                1 + (size_t)iteration % IBZ_LIMBS;
+            for (size_t limb = 0; limb < divisor_limbs; ++limb)
+                divisor[limb] = ibz_test_next_u64(&state);
+            for (size_t limb = divisor_limbs; limb < IBZ_LIMBS; ++limb)
+                divisor[limb] = 0;
+            divisor[divisor_limbs - 1] |= 1;
+            if (divisor_limbs == IBZ_LIMBS)
+                divisor[IBZ_LIMBS - 1] &= UINT64_MAX >> 1;
+
+            for (int signs = 0; signs < 4; ++signs) {
+                ibz_copy(&signed_dividend, &dividend);
+                ibz_copy(&signed_divisor, &divisor);
+                if ((signs & 1) != 0)
+                    ibz_neg(&signed_dividend, &signed_dividend);
+                if ((signs & 2) != 0)
+                    ibz_neg(&signed_divisor, &signed_divisor);
+
+                ibz_div(&quotient,
+                        &remainder,
+                        &signed_dividend,
+                        &signed_divisor);
+                ibz_mul(&check, &quotient, &signed_divisor);
+                ibz_add(&check, &check, &remainder);
+                res |= ibz_cmp(&check, &signed_dividend) != 0;
+                ibz_abs(&abs_r, &remainder);
+                ibz_abs(&abs_d, &signed_divisor);
+                res |= ibz_cmp(&abs_r, &abs_d) >= 0;
+                res |= !ibz_is_zero(&remainder) &&
+                       ibz_is_negative(&remainder) !=
+                           ibz_is_negative(&signed_dividend);
+
+                ibz_copy(&alias_q, &signed_dividend);
+                ibz_copy(&alias_r, &signed_divisor);
+                ibz_div(&alias_q, &alias_r, &alias_q, &alias_r);
+                res |= ibz_cmp(&alias_q, &quotient) != 0;
+                res |= ibz_cmp(&alias_r, &remainder) != 0;
+            }
+        }
+    }
+    if (res != section_res) printf("  limb division regression failed\n");
+
+    /* Near-capacity residues exercise the overflow-safe modular-product
+     * path.  For base = modulus-k the expected square/cube are closed forms. */
+    section_res = res;
+    {
+        uint64_t state = UINT64_C(0xbb67ae8584caa73b);
+        ibz_t modulus, base, small, expected;
+        for (int iteration = 0; iteration < 12; ++iteration) {
+            for (size_t limb = 0; limb < IBZ_LIMBS; ++limb)
+                modulus[limb] = ibz_test_next_u64(&state);
+            modulus[IBZ_LIMBS - 1] &= UINT64_MAX >> 1;
+            modulus[IBZ_LIMBS - 1] |= UINT64_C(1) << 62;
+            modulus[0] |= 1;
+
+            const int32_t offset =
+                2 + (int32_t)(ibz_test_next_u64(&state) % 997);
+            ibz_set(&small, offset);
+            ibz_sub(&base, &modulus, &small);
+
+            ibz_set(&exponent, 2);
+            ibz_pow_mod(&base, &base, &exponent, &modulus);
+            ibz_mul(&expected, &small, &small);
+            res |= ibz_cmp(&base, &expected) != 0;
+
+            ibz_sub(&base, &modulus, &small);
+            ibz_set(&exponent, 3);
+            ibz_pow_mod(&base, &base, &exponent, &modulus);
+            ibz_mul(&expected, &small, &small);
+            ibz_mul(&expected, &expected, &small);
+            ibz_sub(&expected, &modulus, &expected);
+            res |= ibz_cmp(&base, &expected) != 0;
+        }
+    }
+    if (res != section_res) printf("  wide modular product regression failed\n");
 
     if (res)
         printf("Quaternion module fixed-precision integer regressions failed\n");
