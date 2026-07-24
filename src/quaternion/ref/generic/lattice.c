@@ -333,8 +333,8 @@ quat_lattice_mul(quat_lattice_t *res,
     int hnfmod_bound = 2 * ibz_bitsize(norm1) + 2 * ibz_bitsize(norm2) +
                        4 * denom1_bits + 4 * denom2_bits;
     int safety_margin = 64;
-    int use_ml2 = hnfmod_bound > IBZ_BITS - 1 ||
-                  2 * hnfmod_bound + safety_margin > IBZ_BITS;
+    int use_ml2 = hnfmod_bound > IBZ_HNF_ROUTE_BITS - 1 ||
+                  2 * hnfmod_bound + safety_margin > IBZ_HNF_ROUTE_BITS;
 
     if (ibz_cmp(norm1, &ibz_const_zero) <= 0 ||
         ibz_cmp(norm2, &ibz_const_zero) <= 0 ||
@@ -402,18 +402,16 @@ quat_lattice_mul(quat_lattice_t *res,
     // ibz_finalize(&t1);
     // ibz_finalize(&t2);
 
-    /* paper Issue 11/12 spec: when HNF mod core's m^2 transient would exceed
-     * the IBZ_BITS cap, fall through to the spec-faithful "form bar(J_t)·I
-     * product, run LLL directly on its 16 column generators" path via
-     * ML2(d=16). This matches paper §SuitableIdeals "form ideal product,
+    /* paper Issue 11/12 spec: when the validated compact-width routing says
+     * that HNF is unsafe, fall through to the spec-faithful "form
+     * bar(J_t)·I product, run LLL directly on its 16 column generators" path
+     * via ML2(d=16). This matches paper §SuitableIdeals "form ideal product,
      * compute Gram, run LLL" without the canonical-HNF cofactor expansion.
      *
-     * At 110-limb (IBZ_BITS=7040), HNF's ~2*hnfmod transient stays well under
-     * the cap and HNF is faster + paper-strict for that path — we keep it.
-     * At 28-limb (IBZ_BITS=1792), hnfmod ~ 1000 bit yields ~2000 bit transient
-     * > cap → silent overflow → hang; route via ML2 instead. ML2(d=16) at
-     * 110-limb had a known regression (oscillation in dpe precision), so we
-     * only invoke it when forced by the cap. */
+     * The worst-case branch widens ibz_t but deliberately retains the original
+     * compact routing threshold: extra storage bits alone do not bound HNF's
+     * extended-GCD coefficients and must not silently select a previously
+     * untested HNF path. */
     {
         if (use_ml2) {
             ibz_vec_4_t reduced[4];

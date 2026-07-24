@@ -29,15 +29,28 @@ extern "C"
 #define _IBZ_CONCAT(a, b) a##b
 #define _IBZ_CONCAT2(a, b) _IBZ_CONCAT(a, b)
 
-#define IBZ_LIMBS_lvl1 28  /* NIST Level I:   1792 total bits */
-#define IBZ_LIMBS_lvl3 43  /* NIST Level III: 2752 total bits */
-#define IBZ_LIMBS_lvl5 56  /* NIST Level V:   3584 total bits */
+/* Worst-case precision targets, rounded up to complete 64-bit limbs. */
+#define IBZ_LIMBS_lvl1 33  /* NIST-I:   2112 total / 2111 signed bits >= 2066 */
+#define IBZ_LIMBS_lvl3 49  /* NIST-III: 3136 total / 3135 signed bits >= 3119 */
+#define IBZ_LIMBS_lvl5 65  /* NIST-V:   4160 total / 4159 signed bits >= 4101 */
 
 #ifdef SQISIGN_VARIANT
 #define IBZ_LIMBS _IBZ_CONCAT2(IBZ_LIMBS_, SQISIGN_VARIANT)
 #else
 #define IBZ_LIMBS IBZ_LIMBS_lvl5 /* Conservative standalone default: Level V */
 #endif
+#endif
+
+/* Widening the storage type alone must not switch the compact lattice product
+ * from its validated ML2 route to HNF: HNF's Bézout coefficients need more
+ * headroom than the modulus-size estimate used for routing. */
+#define IBZ_HNF_ROUTE_BITS_lvl1 (28 * 64)
+#define IBZ_HNF_ROUTE_BITS_lvl3 (43 * 64)
+#define IBZ_HNF_ROUTE_BITS_lvl5 (56 * 64)
+#ifdef SQISIGN_VARIANT
+#define IBZ_HNF_ROUTE_BITS _IBZ_CONCAT2(IBZ_HNF_ROUTE_BITS_, SQISIGN_VARIANT)
+#else
+#define IBZ_HNF_ROUTE_BITS IBZ_HNF_ROUTE_BITS_lvl5
 #endif
 
 #ifndef IBZ_BITS
