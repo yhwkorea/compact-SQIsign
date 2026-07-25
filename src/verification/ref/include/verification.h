@@ -76,6 +76,19 @@ void hash_to_challenge(scalar_t *scalar,
  */
 int protocols_verify(signature_t *sig, const public_key_t *pk, const unsigned char *m, size_t l);
 
+/**
+ * @brief Verify with the valid-input workload of the original Release build
+ *
+ * This internal compatibility entry point omits the Release-only basis-hint
+ * validation added for untrusted inputs.  It is reserved for the benchmark
+ * driver after that driver has generated the key and signature itself.
+ * Production callers must use protocols_verify().
+ */
+int protocols_verify_original_release(signature_t *sig,
+                                      const public_key_t *pk,
+                                      const unsigned char *m,
+                                      size_t l);
+
 /*************************** Encoding *****************************/
 
 /** @defgroup encoding Encoding and decoding functions

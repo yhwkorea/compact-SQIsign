@@ -338,10 +338,21 @@ ec_curve_to_basis_2f_to_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, uint8_t 
     return 1;
 }
 
-// Computes a basis E[2^f] = <P, Q> where the point Q is above (0 : 0)
-// given the hints as an array for faster basis computation
-int
-ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const uint8_t hint)
+/*
+ * Computes a basis E[2^f] = <P, Q> where the point Q is above (0 : 0),
+ * given the hint used for faster basis computation.
+ *
+ * validate_hint is true for every production caller.  The false case exists
+ * only so the benchmark can reproduce the valid-input workload of the
+ * original SQIsign Release build, where the checks below were compiled out by
+ * NDEBUG.  It must never be used to process attacker-controlled input.
+ */
+static int
+ec_curve_to_basis_2f_from_hint_core(ec_basis_t *PQ2,
+                                    ec_curve_t *curve,
+                                    int f,
+                                    const uint8_t hint,
+                                    const bool validate_hint)
 {
     // Normalise (A/C : 1) and ((A + 2)/4 : 1)
     ec_normalize_curve_and_A24(curve);
@@ -350,7 +361,7 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
         /* The dedicated E0 basis has no search choice.  Generation encodes
          * this case with the unique hint 0, so accepting any other byte would
          * create non-canonical public-key/signature encodings. */
-        if (hint != 0) {
+        if (validate_hint && hint != 0) {
             return 0;
         }
         ec_basis_E0_2f(PQ2, curve, f);
@@ -364,7 +375,7 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
 
     /* Reject a hint that selects the wrong construction before entering a
      * helper whose precondition depends on the quadratic character of A. */
-    if ((bool)fp2_is_square(&curve->A) != hint_A) {
+    if (validate_hint && (bool)fp2_is_square(&curve->A) != hint_A) {
         return 0;
     }
 
@@ -404,10 +415,17 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
     }
     fp2_set_one(&P.z);
 
-    /* Hints come from an untrusted public key or signature during
-     * verification, so these validity checks must also run in release builds. */
-    if (!is_on_curve(&P.x, curve) ||
-        fp2_is_square(&P.x)) {
+    /*
+     * Production callers validate untrusted hints in every build.  The
+     * original implementation performed these checks only in debug builds,
+     * so retain that behavior for the benchmark-only compatibility path.
+     */
+#ifdef NDEBUG
+    if (validate_hint &&
+        (!is_on_curve(&P.x, curve) || fp2_is_square(&P.x))) {
+#else
+    if (!is_on_curve(&P.x, curve) || fp2_is_square(&P.x)) {
+#endif
         return 0;
     }
 
@@ -425,9 +443,28 @@ ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const 
     copy_point(&PQ2->P, &P);
     copy_point(&PQ2->PmQ, &Q);
 
+#ifdef NDEBUG
+    if (validate_hint && !test_basis_order_twof(PQ2, curve, f)) {
+#else
     if (!test_basis_order_twof(PQ2, curve, f)) {
+#endif
         return 0;
     }
 
     return 1;
+}
+
+int
+ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const uint8_t hint)
+{
+    return ec_curve_to_basis_2f_from_hint_core(PQ2, curve, f, hint, true);
+}
+
+int
+ec_curve_to_basis_2f_from_hint_original_release(ec_basis_t *PQ2,
+                                                ec_curve_t *curve,
+                                                int f,
+                                                const uint8_t hint)
+{
+    return ec_curve_to_basis_2f_from_hint_core(PQ2, curve, f, hint, false);
 }
