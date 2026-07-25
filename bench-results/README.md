@@ -43,6 +43,11 @@ quickly so the loop can retry with a fresh seed.
 - `--only=keypair` times only KeyGen.
 - `--only=sign` does KeyGen as **untimed setup**, then times Sign.
 - `--only=verify` does KeyGen + Sign as **untimed setup**, then times Verify.
+- The Compact benchmark defaults to `--verify-mode=original`, which matches
+  the valid-input basis-recovery workload compiled by the original SQIsign
+  Release verifier.  `--verify-mode=hardened` instead measures the production
+  verifier's extra untrusted-input basis checks.  This switch is local to the
+  benchmark executable; the public API remains hardened.
 - We accumulate until **20 valid** (exit-0) attempts per phase, with a hard cap
   of 200 attempts per phase as a safety net.
 - Both Mcyc (`RDTSC` via the existing `bench.h` cycle counter) and wall-clock
@@ -79,6 +84,8 @@ To both the KLKL25 baseline and Ours (where applicable):
 Plus, for the benchmark driver only:
 
 - `apps/benchmark.c` — `--only=<phase>` flag (keypair / sign / verify / all).
+- `apps/benchmark.c` — `--verify-mode=<original|hardened>` flag.  The default
+  is `original` for comparison with the original SQIsign Release benchmark.
 
 ## Layout of the on-disk results
 

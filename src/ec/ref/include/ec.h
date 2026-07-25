@@ -435,6 +435,19 @@ int ec_curve_to_basis_2f_to_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, uint
  * The algorithm is deterministc
  */
 int ec_curve_to_basis_2f_from_hint(ec_basis_t *PQ2, ec_curve_t *curve, int f, const uint8_t hint);
+
+/**
+ * @brief Reproduce the original Release valid-input basis-recovery workload
+ *
+ * This compatibility entry point omits validation of an externally supplied
+ * hint in Release builds.  It is reserved for the benchmark driver, which
+ * supplies a key and signature generated in the same process.  Production
+ * verification must use ec_curve_to_basis_2f_from_hint().
+ */
+int ec_curve_to_basis_2f_from_hint_original_release(ec_basis_t *PQ2,
+                                                    ec_curve_t *curve,
+                                                    int f,
+                                                    const uint8_t hint);
 /** // end basis computations
  * @}
  */

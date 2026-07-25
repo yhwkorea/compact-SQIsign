@@ -93,12 +93,14 @@
 
 // Namespacing symbols exported from basis.c:
 #undef ec_curve_to_basis_2f_from_hint
+#undef ec_curve_to_basis_2f_from_hint_original_release
 #undef ec_curve_to_basis_2f_to_hint
 #undef ec_recover_y
 #undef lift_basis
 #undef lift_basis_normalized
 
 #define ec_curve_to_basis_2f_from_hint                  SQISIGN_NAMESPACE(ec_curve_to_basis_2f_from_hint)
+#define ec_curve_to_basis_2f_from_hint_original_release SQISIGN_NAMESPACE(ec_curve_to_basis_2f_from_hint_original_release)
 #define ec_curve_to_basis_2f_to_hint                    SQISIGN_NAMESPACE(ec_curve_to_basis_2f_to_hint)
 #define ec_recover_y                                    SQISIGN_NAMESPACE(ec_recover_y)
 #define lift_basis                                      SQISIGN_NAMESPACE(lift_basis)
@@ -1053,8 +1055,10 @@
 
 // Namespacing symbols exported from verify.c:
 #undef protocols_verify
+#undef protocols_verify_original_release
 
 #define protocols_verify                                SQISIGN_NAMESPACE(protocols_verify)
+#define protocols_verify_original_release               SQISIGN_NAMESPACE(protocols_verify_original_release)
 
 // Namespacing symbols exported from xeval.c:
 #undef xeval_2

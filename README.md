@@ -137,6 +137,14 @@ cmake -B build -DSQISIGN_BUILD_TYPE=broadwell -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
+For apples-to-apples Verify measurements, `benchmark_<level>` defaults to
+`--verify-mode=original`: it reproduces the valid-input basis-recovery
+workload of the original SQIsign Release benchmark.  This affects only the
+benchmark executable.  The library APIs, tests, examples, and fuzz targets
+continue to use the hardened verifier.  Use `--verify-mode=hardened` when the
+production verifier, including its untrusted-input basis checks, is the
+quantity to measure.
+
 `KLKL25` is the reference implementation accompanying the prior work cited as
 KLKL25 (URL withheld for double-blind review), defaulting to
 `{110, 168, 222}` limbs. It needs five patches before it can be

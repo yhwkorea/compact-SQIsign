@@ -36,10 +36,27 @@ check_canonical_basis_change_matrix(const signature_t *sig)
     return ret;
 }
 
+static int
+recover_basis_from_hint_verify(ec_basis_t *basis,
+                               ec_curve_t *curve,
+                               int f,
+                               const uint8_t hint,
+                               const bool original_release)
+{
+    if (original_release) {
+        return ec_curve_to_basis_2f_from_hint_original_release(basis, curve, f, hint);
+    }
+    return ec_curve_to_basis_2f_from_hint(basis, curve, f, hint);
+}
+
 // Compute the 2^n isogeny from the signature with kernel
 // P + [chall_coeff]Q and store the codomain in E_chall
 static int
-compute_challenge_verify(ec_curve_t *E_chall, const signature_t *sig, const ec_curve_t *Epk, const uint8_t hint_pk)
+compute_challenge_verify(ec_curve_t *E_chall,
+                         const signature_t *sig,
+                         const ec_curve_t *Epk,
+                         const uint8_t hint_pk,
+                         const bool original_release)
 {
     ec_basis_t bas_EA;
     ec_isog_even_t phi_chall;
@@ -49,7 +66,8 @@ compute_challenge_verify(ec_curve_t *E_chall, const signature_t *sig, const ec_c
     phi_chall.length = TORSION_EVEN_POWER - sig->backtracking;
 
     // Compute the basis from the supplied hint
-    if (!ec_curve_to_basis_2f_from_hint(&bas_EA, &phi_chall.curve, TORSION_EVEN_POWER, hint_pk)) // canonical
+    if (!recover_basis_from_hint_verify(
+            &bas_EA, &phi_chall.curve, TORSION_EVEN_POWER, hint_pk, original_release)) // canonical
         return 0;
 
     // recovering the exact challenge
@@ -110,11 +128,13 @@ challenge_and_aux_basis_verify(ec_basis_t *B_chall_can,
                                ec_curve_t *E_chall,
                                ec_curve_t *E_aux,
                                signature_t *sig,
-                               const int pow_dim2_deg_resp)
+                               const int pow_dim2_deg_resp,
+                               const bool original_release)
 {
 
     // recovering the canonical basis as TORSION_EVEN_POWER for consistency with signing
-    if (!ec_curve_to_basis_2f_from_hint(B_chall_can, E_chall, TORSION_EVEN_POWER, sig->hint_chall))
+    if (!recover_basis_from_hint_verify(
+            B_chall_can, E_chall, TORSION_EVEN_POWER, sig->hint_chall, original_release))
         return 0;
 
     // setting to the right order
@@ -123,7 +143,8 @@ challenge_and_aux_basis_verify(ec_basis_t *B_chall_can,
                       B_chall_can,
                       E_chall);
 
-    if (!ec_curve_to_basis_2f_from_hint(B_aux_can, E_aux, TORSION_EVEN_POWER, sig->hint_aux))
+    if (!recover_basis_from_hint_verify(
+            B_aux_can, E_aux, TORSION_EVEN_POWER, sig->hint_aux, original_release))
         return 0;
 
     // setting to the right order
@@ -246,8 +267,12 @@ compute_commitment_curve_verify(ec_curve_t *E_com,
 }
 
 // SQIsign verification
-int
-protocols_verify(signature_t *sig, const public_key_t *pk, const unsigned char *m, size_t l)
+static int
+protocols_verify_core(signature_t *sig,
+                      const public_key_t *pk,
+                      const unsigned char *m,
+                      size_t l,
+                      const bool original_release)
 {
     int verify;
 
@@ -281,14 +306,15 @@ protocols_verify(signature_t *sig, const public_key_t *pk, const unsigned char *
 
     // computation of the challenge
     ec_curve_t E_chall;
-    if (!compute_challenge_verify(&E_chall, sig, &pk->curve, pk->hint_pk)) {
+    if (!compute_challenge_verify(&E_chall, sig, &pk->curve, pk->hint_pk, original_release)) {
         return 0;
     }
 
     // Computation of the canonical bases for the challenge and aux curve
     ec_basis_t B_chall_can, B_aux_can;
 
-    if (!challenge_and_aux_basis_verify(&B_chall_can, &B_aux_can, &E_chall, &E_aux, sig, pow_dim2_deg_resp)) {
+    if (!challenge_and_aux_basis_verify(
+            &B_chall_can, &B_aux_can, &E_chall, &E_aux, sig, pow_dim2_deg_resp, original_release)) {
         return 0;
     }
 
@@ -315,4 +341,19 @@ protocols_verify(signature_t *sig, const public_key_t *pk, const unsigned char *
     verify = mp_compare(sig->chall_coeff, chk_chall, NWORDS_ORDER) == 0;
 
     return verify;
+}
+
+int
+protocols_verify(signature_t *sig, const public_key_t *pk, const unsigned char *m, size_t l)
+{
+    return protocols_verify_core(sig, pk, m, l, false);
+}
+
+int
+protocols_verify_original_release(signature_t *sig,
+                                  const public_key_t *pk,
+                                  const unsigned char *m,
+                                  size_t l)
+{
+    return protocols_verify_core(sig, pk, m, l, true);
 }
