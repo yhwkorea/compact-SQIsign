@@ -689,6 +689,98 @@ quat_test_lideal_compact_intersection_scalars(void)
     return res;
 }
 
+int
+quat_test_lideal_compact_intersection_trace_gcd(void)
+{
+    int res = 0;
+    quat_alg_t alg;
+    quat_lattice_t order, sum_oracle, intersection_oracle;
+    quat_alg_elem_t generator1, generator2, scalar2;
+    quat_left_ideal_t ideal1_base, ideal1, ideal2, intersection;
+    ibz_t norm17, norm_gcd, sum_index, sum_norm;
+    ibz_t intersection_index, intersection_norm;
+
+    quat_alg_init_set_ui(&alg, 103);
+    quat_lattice_init(&order);
+    quat_lattice_init(&sum_oracle);
+    quat_lattice_init(&intersection_oracle);
+    quat_alg_elem_init(&generator1);
+    quat_alg_elem_init(&generator2);
+    quat_alg_elem_init(&scalar2);
+    quat_left_ideal_init(&ideal1_base);
+    quat_left_ideal_init(&ideal1);
+    quat_left_ideal_init(&ideal2);
+    quat_left_ideal_init(&intersection);
+    ibz_init(&norm17);
+    ibz_init(&norm_gcd);
+    ibz_init(&sum_index);
+    ibz_init(&sum_norm);
+    ibz_init(&intersection_index);
+    ibz_init(&intersection_norm);
+
+    quat_lattice_O0_set(&order);
+    ibz_set(&norm17, 17);
+    quat_alg_elem_set(&generator1, 1, 3, 5, 7, 11);
+    quat_alg_elem_set(&generator2, 1, 1, 4, 0, 0);
+    quat_alg_elem_set(&scalar2, 1, 2, 0, 0, 0);
+
+    res |= !quat_lideal_create(
+        &ideal1_base, &generator1, &norm17, &order, &alg);
+    res |= !quat_lideal_mul(&ideal1, &ideal1_base, &scalar2, &alg);
+    res |= !quat_lideal_create(
+        &ideal2, &generator2, &norm17, &order, &alg);
+
+    /* The norm gcd alone is 17, whereas the reduced norm of the exact sum is
+     * one. Thus Algorithm 3 must use its 16 reduced-trace pairings to lower d
+     * from 17 to 1. Scaling only the first ideal also forces the reduced input
+     * lattice denominators to be unequal. */
+    res |= ibz_cmp_int32(&ideal1.norm, 68);
+    res |= ibz_cmp_int32(&ideal2.norm, 17);
+    res |= ibz_cmp_int32(&ideal1.lattice.denom, 1);
+    res |= ibz_cmp_int32(&ideal2.lattice.denom, 2);
+    ibz_gcd(&norm_gcd, &ideal1.norm, &ideal2.norm);
+    res |= ibz_cmp_int32(&norm_gcd, 17);
+    res |= !quat_lattice_add(
+        &sum_oracle, &ideal1.lattice, &ideal2.lattice);
+    res |= !quat_lattice_index(&sum_index, &sum_oracle, &order);
+    res |= !ibz_sqrt(&sum_norm, &sum_index);
+    res |= !ibz_is_one(&sum_norm);
+    res |= !quat_lattice_equal(&sum_oracle, &order);
+
+    res |= !quat_lattice_intersect(
+        &intersection_oracle, &ideal1.lattice, &ideal2.lattice);
+    res |= !quat_lattice_index(
+        &intersection_index, &intersection_oracle, &order);
+    res |= !ibz_sqrt(&intersection_norm, &intersection_index);
+    res |= ibz_cmp_int32(&intersection_norm, 1156);
+    res |= !quat_lideal_inter(&intersection, &ideal1, &ideal2, &alg);
+    res |= !quat_lattice_equal(
+        &intersection.lattice, &intersection_oracle);
+    res |= ibz_cmp(&intersection.norm, &intersection_norm);
+
+    if (res != 0)
+        printf("Quaternion unit test compact lideal trace-gcd intersection failed\n");
+
+    ibz_finalize(&intersection_norm);
+    ibz_finalize(&intersection_index);
+    ibz_finalize(&sum_norm);
+    ibz_finalize(&sum_index);
+    ibz_finalize(&norm_gcd);
+    ibz_finalize(&norm17);
+    quat_left_ideal_finalize(&intersection);
+    quat_left_ideal_finalize(&ideal2);
+    quat_left_ideal_finalize(&ideal1);
+    quat_left_ideal_finalize(&ideal1_base);
+    quat_alg_elem_finalize(&scalar2);
+    quat_alg_elem_finalize(&generator2);
+    quat_alg_elem_finalize(&generator1);
+    quat_lattice_finalize(&intersection_oracle);
+    quat_lattice_finalize(&sum_oracle);
+    quat_lattice_finalize(&order);
+    quat_alg_finalize(&alg);
+    return res;
+}
+
 // void quat_lideal_inverse_lattice_without_hnf(quat_lattice_t *inv, const quat_left_ideal_t
 // *lideal, const quat_alg_t *alg);
 int
@@ -1084,6 +1176,7 @@ quat_test_lideal(void)
     res = res | quat_test_lideal_conj_without_hnf();
     res = res | quat_test_lideal_add_intersect_equals();
     res = res | quat_test_lideal_compact_intersection_scalars();
+    res = res | quat_test_lideal_compact_intersection_trace_gcd();
     res = res | quat_test_lideal_inverse_lattice_without_hnf();
     res = res | quat_test_lideal_right_transporter();
     res = res | quat_test_lideal_right_order();

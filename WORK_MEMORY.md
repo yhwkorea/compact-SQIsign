@@ -56,7 +56,10 @@ Last updated: 2026-08-04 (Asia/Seoul)
 - Compact ideal algorithms and API: `ideal.c`, `lll/mlll.c`,
   `include/quaternion.h`, and `mlll_internals.h`.
 - Signing dispatch: `src/signature/ref/lvlx/sign.c`.
-- Regression coverage: `test/ideal.c` and `test/ml2_correctness.c`.
+- Regression coverage: `test/ideal.c` and `test/ml2_correctness.c`. The
+  former includes a trace-GCD fixture with `gcd(N1,N2)=17`, `d=1`, and
+  unequal denominators; the latter includes a composable noncommutative
+  product checked against the small exact-HNF path and against its reverse.
 - Persistent handoff: this `WORK_MEMORY.md`.
 
 ## Baseline verification
@@ -88,11 +91,39 @@ Last updated: 2026-08-04 (Asia/Seoul)
   `sqisign_gen_sqisign_secure_free` symbol. The end-to-end scheme binaries,
   which exercise signing, link and pass at all levels.
 
+## Second correctness audit
+
+- Three independent read-only audits rechecked the Algorithm 2/3 formulas,
+  Lemma-13 assumptions and multiplication order, signed precision, HNF
+  routing, precomputation constants, overflow preflights, and Git state. No
+  concrete implementation defect or unsafe-overflow path was found.
+- A mechanical second check covered all 87 shortened negative precomputation
+  initializers. Every retained prefix was identical, every discarded limb
+  was all ones, and every new top limb retained its sign bit.
+- Fresh overflow-check Debug tests passed for all three quaternion targets.
+  End-to-end signing passed ten consecutive fresh-randomness runs at each
+  security level, followed by another all-level pass after test hardening.
+- The audit found two test-discrimination gaps, not production defects, and
+  closed both:
+  - Algorithm 3 now has a fixed case where the norm gcd is 17 but the exact
+    sum norm and trace-derived `d` are 1, with input denominators 1 and 2.
+    The compact result and norm 1156 match the independent dual/HNF oracle.
+  - Algorithm 2 now has a composable noncommutative product with nontrivial
+    denominators. It matches the independent small exact-HNF product, while
+    the reverse product is explicitly different.
+- With those fixtures present, Debug/overflow-check and Release/ref builds
+  and all lvl1/3/5 quaternion plus end-to-end scheme CTest cases pass.
+- The Release rebuild emitted the already-existing `intbig.c:1277`
+  `-Wmaybe-uninitialized` warning in the random test helper; it is outside
+  these changes and does not fail the build.
+
 ## Delivery / next action
 
-- At the final pre-commit fetch, local `worst-case` and
-  `origin/worst-case` were both at baseline `25f3485`; the remote had not
-  advanced.
+- Initial implementation commit `f772348` was pushed to
+  `origin/worst-case`. The second audit adds only the two deterministic
+  regression fixtures and this updated handoff record.
+- A fresh pre-commit fetch confirmed that both local `HEAD` and
+  `origin/worst-case` were still `f772348`; the remote had not advanced.
 - This file is included in the delivery commit. If this copy was read from
   `origin/worst-case`, the push completed. If it exists only in a local
   clone, the sole remaining delivery command is `git push origin worst-case`.

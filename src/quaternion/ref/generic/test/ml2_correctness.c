@@ -1084,6 +1084,89 @@ ml2_test_multiplication_alias_and_nonpublication(void)
     return failed;
 }
 
+/* Compare CompactIdealMultiplication with the independent exact-HNF branch
+ * on a genuinely ordered ideal product.  Conjugating O_0*x gives xbar*O_0,
+ * so (xbar*O_0)*(O_0*y) is composable.  The reverse lattice product differs
+ * for the chosen noncommuting x and y and therefore makes operand reversal a
+ * detectable regression. */
+static int
+ml2_test_multiplication_noncommutative_hnf_oracle(void)
+{
+    int failed = 0;
+    quat_alg_t alg;
+    quat_lattice_t order, left, exact, compact, reverse_exact;
+    quat_alg_elem_t x, y;
+    quat_left_ideal_t ideal_x, ideal_y;
+
+    quat_alg_init_set_ui(&alg, 103);
+    quat_lattice_init(&order);
+    quat_lattice_init(&left);
+    quat_lattice_init(&exact);
+    quat_lattice_init(&compact);
+    quat_lattice_init(&reverse_exact);
+    quat_alg_elem_init(&x);
+    quat_alg_elem_init(&y);
+    quat_left_ideal_init(&ideal_x);
+    quat_left_ideal_init(&ideal_y);
+
+    quat_lattice_O0_set(&order);
+    quat_alg_elem_set(&x, 1, 1, 1, 0, 0); /* 1 + i */
+    quat_alg_elem_set(&y, 2, 0, 1, 1, 0); /* (i + j)/2 in O_0 */
+    if (!quat_lideal_create_principal(&ideal_x, &x, &order, &alg) ||
+        !quat_lideal_create_principal(&ideal_y, &y, &order, &alg)) {
+        printf("[mlll_mul_noncommutative] FAIL: could not build principal ideals\n");
+        failed = 1;
+        goto cleanup;
+    }
+    quat_lattice_conjugate_without_hnf(&left, &ideal_x.lattice);
+
+    if (ibz_is_one(&left.denom) || ibz_is_one(&ideal_y.lattice.denom)) {
+        printf("[mlll_mul_noncommutative] FAIL: fixture lost nontrivial denominators\n");
+        failed = 1;
+        goto cleanup;
+    }
+
+    /* These small norms and denominators force quat_lattice_mul through its
+     * exact modular-HNF branch, independently of quat_lattice_mul_mlll. */
+    if (!quat_lattice_mul(&exact,
+                          &left,
+                          &ideal_y.lattice,
+                          &alg,
+                          &ideal_x.norm,
+                          &ideal_y.norm) ||
+        !quat_lattice_mul_mlll(
+            &compact, &left, &ideal_y.lattice, &alg) ||
+        !quat_lattice_equal(&compact, &exact)) {
+        printf("[mlll_mul_noncommutative] FAIL: compact product differs from exact HNF\n");
+        failed = 1;
+        goto cleanup;
+    }
+
+    if (!quat_lattice_mul(&reverse_exact,
+                          &ideal_y.lattice,
+                          &left,
+                          &alg,
+                          &ideal_y.norm,
+                          &ideal_x.norm) ||
+        quat_lattice_equal(&exact, &reverse_exact)) {
+        printf("[mlll_mul_noncommutative] FAIL: fixture does not distinguish operand order\n");
+        failed = 1;
+    }
+
+cleanup:
+    quat_left_ideal_finalize(&ideal_y);
+    quat_left_ideal_finalize(&ideal_x);
+    quat_alg_elem_finalize(&y);
+    quat_alg_elem_finalize(&x);
+    quat_lattice_finalize(&reverse_exact);
+    quat_lattice_finalize(&compact);
+    quat_lattice_finalize(&exact);
+    quat_lattice_finalize(&left);
+    quat_lattice_finalize(&order);
+    quat_alg_finalize(&alg);
+    return failed;
+}
+
 static int
 ml2_test_fake_abort(ibz_vec_4_t *output,
                     int out_capacity,
@@ -1596,6 +1679,7 @@ quat_test_ml2_correctness(void)
     failed |= ml2_test_retry_recovery_and_nonpublication();
     failed |= ml2_test_addition_and_failure_nonpublication();
     failed |= ml2_test_multiplication_alias_and_nonpublication();
+    failed |= ml2_test_multiplication_noncommutative_hnf_oracle();
     failed |= ml2_test_ideal_construction_mod_N();
 #if defined(SQISIGN_ML2_PROFILE)
     failed |= ml2_test_profile_accounting();
