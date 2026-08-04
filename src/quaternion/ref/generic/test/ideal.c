@@ -528,12 +528,13 @@ quat_test_lideal_add_intersect_equals(void)
     int res = 0;
 
     quat_alg_t alg;
-    quat_lattice_t order;
+    quat_lattice_t order, intersection_oracle;
     quat_alg_elem_t gen1, gen2, gen3;
     ibz_t N1, N2, N3;
     quat_left_ideal_t lideal1, lideal2, lideal3, lideal4, lideal5;
     quat_alg_init_set_ui(&alg, 103);
     quat_lattice_init(&order);
+    quat_lattice_init(&intersection_oracle);
     quat_alg_elem_init(&gen1);
     quat_alg_elem_init(&gen2);
     quat_alg_elem_init(&gen3);
@@ -585,7 +586,10 @@ quat_test_lideal_add_intersect_equals(void)
     res |= !quat_lideal_equals(&lideal4, &lideal3, &alg);
 
     // Intersection then union should be stable
-    quat_lideal_inter(&lideal4, &lideal1, &lideal2, &alg);
+    res |= !quat_lattice_intersect(
+        &intersection_oracle, &lideal1.lattice, &lideal2.lattice);
+    res |= !quat_lideal_inter(&lideal4, &lideal1, &lideal2, &alg);
+    res |= !quat_lattice_equal(&lideal4.lattice, &intersection_oracle);
     quat_lideal_add(&lideal4, &lideal4, &lideal2, &alg);
     res |= !quat_lideal_equals(&lideal4, &lideal2, &alg);
 
@@ -600,6 +604,7 @@ quat_test_lideal_add_intersect_equals(void)
 
     quat_alg_finalize(&alg);
     quat_lattice_finalize(&order);
+    quat_lattice_finalize(&intersection_oracle);
     quat_alg_elem_finalize(&gen1);
     quat_alg_elem_finalize(&gen2);
     quat_alg_elem_finalize(&gen3);
@@ -616,6 +621,72 @@ quat_test_lideal_add_intersect_equals(void)
         printf("Quaternion unit test lideal_add_intersect_equals failed\n");
     }
     return (res);
+}
+
+int
+quat_test_lideal_compact_intersection_scalars(void)
+{
+    int res = 0;
+    quat_alg_t alg;
+    quat_lattice_t order;
+    quat_alg_elem_t scalar6, scalar10, scalar30;
+    quat_left_ideal_t ideal6, ideal10, expected, intersection, alias, invalid, before;
+
+    quat_alg_init_set_ui(&alg, 103);
+    quat_lattice_init(&order);
+    quat_alg_elem_init(&scalar6);
+    quat_alg_elem_init(&scalar10);
+    quat_alg_elem_init(&scalar30);
+    quat_left_ideal_init(&ideal6);
+    quat_left_ideal_init(&ideal10);
+    quat_left_ideal_init(&expected);
+    quat_left_ideal_init(&intersection);
+    quat_left_ideal_init(&alias);
+    quat_left_ideal_init(&invalid);
+    quat_left_ideal_init(&before);
+
+    quat_lattice_O0_set(&order);
+    quat_alg_elem_set(&scalar6, 1, 6, 0, 0, 0);
+    quat_alg_elem_set(&scalar10, 1, 10, 0, 0, 0);
+    quat_alg_elem_set(&scalar30, 1, 30, 0, 0, 0);
+    res |= !quat_lideal_create_principal(&ideal6, &scalar6, &order, &alg);
+    res |= !quat_lideal_create_principal(&ideal10, &scalar10, &order, &alg);
+    res |= !quat_lideal_create_principal(&expected, &scalar30, &order, &alg);
+
+    /* This non-coprime case exercises the trace-gcd scaling:
+     * 6*O_0 intersect 10*O_0 = 30*O_0, of reduced norm 30^2. */
+    res |= !quat_lideal_inter(&intersection, &ideal6, &ideal10, &alg);
+    res |= !quat_lideal_equals(&intersection, &expected, &alg);
+    res |= ibz_cmp_int32(&intersection.norm, 900);
+
+    /* Aliasing an input is supported because publication is transactional. */
+    quat_lideal_copy(&alias, &ideal6);
+    res |= !quat_lideal_inter(&alias, &alias, &ideal10, &alg);
+    res |= !quat_lideal_equals(&alias, &expected, &alg);
+
+    /* Invalid norms fail closed and leave the caller's output untouched. */
+    quat_lideal_copy(&invalid, &ideal6);
+    ibz_set(&invalid.norm, 0);
+    quat_lideal_copy(&before, &expected);
+    res |= quat_lideal_inter(&before, &invalid, &ideal10, &alg);
+    res |= !quat_lideal_equals(&before, &expected, &alg);
+
+    if (res != 0)
+        printf("Quaternion unit test compact lideal intersection failed\n");
+
+    quat_left_ideal_finalize(&before);
+    quat_left_ideal_finalize(&invalid);
+    quat_left_ideal_finalize(&alias);
+    quat_left_ideal_finalize(&intersection);
+    quat_left_ideal_finalize(&expected);
+    quat_left_ideal_finalize(&ideal10);
+    quat_left_ideal_finalize(&ideal6);
+    quat_alg_elem_finalize(&scalar30);
+    quat_alg_elem_finalize(&scalar10);
+    quat_alg_elem_finalize(&scalar6);
+    quat_lattice_finalize(&order);
+    quat_alg_finalize(&alg);
+    return res;
 }
 
 // void quat_lideal_inverse_lattice_without_hnf(quat_lattice_t *inv, const quat_left_ideal_t
@@ -1012,6 +1083,7 @@ quat_test_lideal(void)
     res = res | quat_test_lideal_mul();
     res = res | quat_test_lideal_conj_without_hnf();
     res = res | quat_test_lideal_add_intersect_equals();
+    res = res | quat_test_lideal_compact_intersection_scalars();
     res = res | quat_test_lideal_inverse_lattice_without_hnf();
     res = res | quat_test_lideal_right_transporter();
     res = res | quat_test_lideal_right_order();

@@ -80,25 +80,13 @@ int quat_lattice_add_mlll(quat_lattice_t *res,
                           const quat_lattice_t *lat2,
                           const quat_alg_t *alg);
 
-/**
- * @brief Lattice intersection using MLLL instead of HNF (Phase 2 hot-path)
- *
- * Same dual-add-dual structure as quat_lattice_intersect, but the inner
- * sum step uses Cohen integer GSO MLLL (quat_lattice_add_mlll). Used by
- * sign.c to route the signature hot path through MLLL while leaving the
- * generic alg-less quat_lattice_intersect unchanged (which would require
- * QUATALG_PINFTY symbol that lives in per-level precomp).
- *
- * @param res Output: intersection lattice
- * @param lat1 First lattice
- * @param lat2 Second lattice
- * @param alg The quaternion algebra (passed through to MLLL)
- * @returns 1 on success, 0 if an internal full-rank reduction failed.
- *          On failure, res is left unchanged.
- */
+/** @brief Paper Algorithm 3, CompactIdealIntersection. */
 int quat_lattice_intersect_mlll(quat_lattice_t *res,
-                                const quat_lattice_t *lat1,
-                                const quat_lattice_t *lat2,
-                                const quat_alg_t *alg);
+                                 ibz_t *intersection_norm,
+                                 const quat_lattice_t *lat1,
+                                 const ibz_t *norm1,
+                                 const quat_lattice_t *lat2,
+                                 const ibz_t *norm2,
+                                 const quat_alg_t *alg);
 
 #endif

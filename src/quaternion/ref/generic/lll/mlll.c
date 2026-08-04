@@ -161,6 +161,87 @@ mlll_lattice_mul_products_fit(const quat_lattice_t *lat1,
     return 1;
 }
 
+static int
+mlll_div_exact(ibz_t *quotient, const ibz_t *numerator, const ibz_t *denominator)
+{
+    ibz_t remainder;
+    int exact;
+
+    if (ibz_is_zero(denominator)) {
+        ibz_set(quotient, 0);
+        return 0;
+    }
+    ibz_init(&remainder);
+    ibz_div(quotient, &remainder, numerator, denominator);
+    exact = ibz_is_zero(&remainder);
+    if (!exact)
+        ibz_set(quotient, 0);
+    ibz_finalize(&remainder);
+    return exact;
+}
+
+/* Bound the exact numerator of trd(alpha * conjugate(beta)) before the
+ * denominator division.  In coordinates this is
+ * 2*(a0*b0 + a1*b1 + p*a2*b2 + p*a3*b3). */
+static int
+mlll_trace_pairing_fits(const ibz_vec_4_t *left,
+                        const ibz_vec_4_t *right,
+                        const quat_alg_t *alg)
+{
+    int bound = 0;
+    for (int coordinate = 0; coordinate < 4; coordinate++) {
+        int term = mlll_product_bound(
+            &(*left)[coordinate], &(*right)[coordinate]);
+        if (coordinate >= 2)
+            term = mlll_weight_bound(term, alg);
+        bound = mlll_positive_sum_bound(bound, term);
+    }
+    return bound == 0 || bound + 1 <= IBZ_BITS - 1;
+}
+
+static int
+mlll_reduced_trace_pairing(ibz_t *trace,
+                           const ibz_vec_4_t *left,
+                           const ibz_vec_4_t *right,
+                           const ibz_t *denominator,
+                           const quat_alg_t *alg)
+{
+    ibz_t numerator, term;
+    int ok = 0;
+
+    if (!mlll_trace_pairing_fits(left, right, alg) ||
+        ibz_is_zero(denominator))
+        return 0;
+
+    ibz_init(&numerator);
+    ibz_init(&term);
+    ibz_set(&numerator, 0);
+    for (int coordinate = 0; coordinate < 4; coordinate++) {
+        ibz_mul(&term, &(*left)[coordinate], &(*right)[coordinate]);
+        if (coordinate >= 2)
+            ibz_mul(&term, &term, &alg->p);
+        ibz_add(&numerator, &numerator, &term);
+    }
+    ibz_mul(&numerator, &numerator, &ibz_const_two);
+    ok = mlll_div_exact(trace, &numerator, denominator);
+    ibz_finalize(&term);
+    ibz_finalize(&numerator);
+    return ok;
+}
+
+static int
+mlll_scaled_coordinate_fits(const ibz_t *coordinate,
+                            const ibz_t *scale,
+                            const ibz_t *ideal_scalar)
+{
+    int coordinate_bits = ibz_bitsize(coordinate);
+    if (coordinate_bits == 0)
+        return 1;
+    return coordinate_bits + ibz_bitsize(scale) +
+               ibz_bitsize(ideal_scalar) <=
+           IBZ_BITS - 1;
+}
+
 /* ========== integer helpers ========== */
 
 /* The former Cohen fraction-free port below cannot represent a zero
@@ -829,6 +910,31 @@ quat_mlll(ibz_mat_4x4_t *basis,
         ibz_vec_4_finalize(&reduced[i]);
 }
 
+/* Full-rank ideal operations must not accept a lower-rank first ML2 attempt.
+ * Retry the fixed span-preserving permutations, then publish only rank four. */
+static int
+mlll_full_rank_basis(ibz_mat_4x4_t *basis,
+                     const ibz_vec_4_t *generators,
+                     int generator_count,
+                     const quat_alg_t *alg)
+{
+    ibz_vec_4_t reduced[4];
+    int rank;
+
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_init(&reduced[i]);
+    rank = quat_ml2_retry(
+        reduced, 4, generators, generator_count, alg);
+    if (rank == 4) {
+        for (int column = 0; column < 4; column++)
+            for (int row = 0; row < 4; row++)
+                ibz_copy(&(*basis)[row][column], &reduced[column][row]);
+    }
+    for (int i = 0; i < 4; i++)
+        ibz_vec_4_finalize(&reduced[i]);
+    return rank == 4;
+}
+
 /* ========== Lattice operations using MLLL ========== */
 
 int
@@ -839,44 +945,64 @@ quat_lattice_mul_mlll(quat_lattice_t *res,
 {
     ibz_vec_4_t elem1, elem2, elem_res;
     ibz_vec_4_t generators[16];
-    quat_lattice_t candidate;
-    int rank = 0;
+    quat_lattice_t lat1_red, lat2_red, candidate;
     int ok = 0;
 
-    if (res == NULL ||
-        !mlll_lattice_mul_products_fit(lat1, lat2, alg))
+    if (res == NULL || lat1 == NULL || lat2 == NULL || alg == NULL ||
+        ibz_is_zero(&lat1->denom) || ibz_is_zero(&lat2->denom) ||
+        ibz_cmp(&alg->p, &ibz_const_zero) <= 0)
         return 0;
 
     ibz_vec_4_init(&elem1);
     ibz_vec_4_init(&elem2);
     ibz_vec_4_init(&elem_res);
+    quat_lattice_init(&lat1_red);
+    quat_lattice_init(&lat2_red);
     quat_lattice_init(&candidate);
     for (int i = 0; i < 16; i++)
         ibz_vec_4_init(&generators[i]);
 
+    /* Algorithm 2, Lines 3-4: shorten both input bases before forming the
+     * sixteen ordered products. */
+    if (!quat_lattice_lll(&lat1_red.basis, lat1, alg) ||
+        !quat_lattice_lll(&lat2_red.basis, lat2, alg))
+        goto cleanup;
+    ibz_copy(&lat1_red.denom, &lat1->denom);
+    ibz_copy(&lat2_red.denom, &lat2->denom);
+    if (!mlll_lattice_mul_products_fit(&lat1_red, &lat2_red, alg))
+        goto cleanup;
+
     for (int k = 0; k < 4; k++) {
-        ibz_vec_4_copy_ibz(&elem1, &(lat1->basis[0][k]), &(lat1->basis[1][k]),
-                           &(lat1->basis[2][k]), &(lat1->basis[3][k]));
+        ibz_vec_4_copy_ibz(&elem1,
+                           &lat1_red.basis[0][k],
+                           &lat1_red.basis[1][k],
+                           &lat1_red.basis[2][k],
+                           &lat1_red.basis[3][k]);
         for (int i = 0; i < 4; i++) {
-            ibz_vec_4_copy_ibz(&elem2, &(lat2->basis[0][i]), &(lat2->basis[1][i]),
-                               &(lat2->basis[2][i]), &(lat2->basis[3][i]));
+            ibz_vec_4_copy_ibz(&elem2,
+                               &lat2_red.basis[0][i],
+                               &lat2_red.basis[1][i],
+                               &lat2_red.basis[2][i],
+                               &lat2_red.basis[3][i]);
             quat_alg_coord_mul(&elem_res, &elem1, &elem2, alg);
             for (int j = 0; j < 4; j++)
                 ibz_copy(&(generators[4 * k + i][j]), &(elem_res[j]));
         }
     }
 
-    quat_mlll(&candidate.basis, &rank, generators, 16, alg);
-    if (rank == 4) {
-        ibz_mul(&candidate.denom, &lat1->denom, &lat2->denom);
-        if (quat_lattice_reduce_denom(&candidate, &candidate)) {
-            ibz_mat_4x4_copy(&res->basis, &candidate.basis);
-            ibz_copy(&res->denom, &candidate.denom);
-            ok = 1;
-        }
-    }
+    if (!mlll_full_rank_basis(&candidate.basis, generators, 16, alg))
+        goto cleanup;
+    ibz_mul(&candidate.denom, &lat1_red.denom, &lat2_red.denom);
+    if (!quat_lattice_reduce_denom(&candidate, &candidate))
+        goto cleanup;
+    ibz_mat_4x4_copy(&res->basis, &candidate.basis);
+    ibz_copy(&res->denom, &candidate.denom);
+    ok = 1;
 
+cleanup:
     quat_lattice_finalize(&candidate);
+    quat_lattice_finalize(&lat2_red);
+    quat_lattice_finalize(&lat1_red);
     ibz_vec_4_finalize(&elem1);
     ibz_vec_4_finalize(&elem2);
     ibz_vec_4_finalize(&elem_res);
@@ -887,63 +1013,151 @@ quat_lattice_mul_mlll(quat_lattice_t *res,
 
 int
 quat_lattice_intersect_mlll(quat_lattice_t *res,
+                            ibz_t *intersection_norm,
                             const quat_lattice_t *lat1,
+                            const ibz_t *norm1,
                             const quat_lattice_t *lat2,
+                            const ibz_t *norm2,
                             const quat_alg_t *alg)
 {
-    /* Paper Algorithm CompactLatticeIntersection (03Ideal.tex:340-).
-     * Critical: Lines 5-6 LLL-reduce inputs so that adjugate bound for
-     * LLL-reduced O_0-ideal bases applies before dual computation
-     * (paper Remark after lem:latticeinter-bound). Line 14 LLL-reduce output. */
+    /* Paper Algorithm 3, CompactIdealIntersection.
+     *
+     * For integral left O_0-ideals, the trace gcd below is nrd(I1 + I2).
+     * With a = nrd(I1)/d and b = nrd(I2)/d, Lemma 14 gives
+     * I1 intersect I2 = b*I1 + a*I2. ML2 reduces those eight generators
+     * directly, avoiding both lattice duals and HNF. */
     quat_lattice_t lat1_red, lat2_red;
-    quat_lattice_t dual1, dual2, dual_res;
     quat_lattice_t candidate;
-    ibz_mat_4x4_t res_red;
+    ibz_vec_4_t generators[8];
+    ibz_vec_4_t left, right;
+    ibz_t denominator1, denominator2, denominator_product;
+    ibz_t denominator_gcd, common_denominator, scale1, scale2;
+    ibz_t trace_gcd, trace, a, b, candidate_norm, quotient_scratch;
     int ok = 0;
+
+    if (res == NULL || intersection_norm == NULL || lat1 == NULL ||
+        norm1 == NULL || lat2 == NULL ||
+        norm2 == NULL || alg == NULL || ibz_is_zero(&lat1->denom) ||
+        ibz_is_zero(&lat2->denom) ||
+        ibz_cmp(norm1, &ibz_const_zero) <= 0 ||
+        ibz_cmp(norm2, &ibz_const_zero) <= 0 ||
+        ibz_cmp(&alg->p, &ibz_const_zero) <= 0)
+        return 0;
+
     quat_lattice_init(&lat1_red);
     quat_lattice_init(&lat2_red);
-    quat_lattice_init(&dual1);
-    quat_lattice_init(&dual2);
-    quat_lattice_init(&dual_res);
     quat_lattice_init(&candidate);
-    ibz_mat_4x4_init(&res_red);
+    for (int i = 0; i < 8; i++)
+        ibz_vec_4_init(&generators[i]);
+    ibz_vec_4_init(&left);
+    ibz_vec_4_init(&right);
+    ibz_init(&denominator1);
+    ibz_init(&denominator2);
+    ibz_init(&denominator_product);
+    ibz_init(&denominator_gcd);
+    ibz_init(&common_denominator);
+    ibz_init(&scale1);
+    ibz_init(&scale2);
+    ibz_init(&trace_gcd);
+    ibz_init(&trace);
+    ibz_init(&a);
+    ibz_init(&b);
+    ibz_init(&candidate_norm);
+    ibz_init(&quotient_scratch);
 
-    /* Paper lines 5-6: M_k <- LLL(M_k; delta=3/4) */
+    /* Algorithm 3, Lines 1-2. */
     if (!quat_lattice_lll(&(lat1_red.basis), lat1, alg))
         goto cleanup;
-    ibz_copy(&(lat1_red.denom), &(lat1->denom));
-
     if (!quat_lattice_lll(&(lat2_red.basis), lat2, alg))
         goto cleanup;
+    ibz_copy(&(lat1_red.denom), &(lat1->denom));
     ibz_copy(&(lat2_red.denom), &(lat2->denom));
 
-    /* Paper lines 7-12: duals, sum via MLLL, dual back */
-    if (!quat_lattice_dual_without_hnf(&dual1, &lat1_red) ||
-        !quat_lattice_dual_without_hnf(&dual2, &lat2_red))
+    ibz_abs(&denominator1, &lat1_red.denom);
+    ibz_abs(&denominator2, &lat2_red.denom);
+    if (ibz_bitsize(&denominator1) + ibz_bitsize(&denominator2) >
+        IBZ_BITS - 1)
         goto cleanup;
-    if (!quat_lattice_add_mlll(&dual_res, &dual1, &dual2, alg)) {
-        goto cleanup;
+    ibz_mul(&denominator_product, &denominator1, &denominator2);
+
+    /* Algorithm 3, Lines 3-4: d = gcd(N1, N2, all trace pairings). */
+    ibz_gcd(&trace_gcd, norm1, norm2);
+    for (int r = 0; r < 4; r++) {
+        for (int coordinate = 0; coordinate < 4; coordinate++)
+            ibz_copy(&left[coordinate], &lat1_red.basis[coordinate][r]);
+        for (int s = 0; s < 4; s++) {
+            for (int coordinate = 0; coordinate < 4; coordinate++)
+                ibz_copy(&right[coordinate], &lat2_red.basis[coordinate][s]);
+            if (!mlll_reduced_trace_pairing(
+                    &trace, &left, &right, &denominator_product, alg))
+                goto cleanup;
+            ibz_gcd(&trace_gcd, &trace_gcd, &trace);
+        }
     }
-    if (!quat_lattice_dual_without_hnf(&candidate, &dual_res))
+    ibz_abs(&trace_gcd, &trace_gcd);
+    if (ibz_is_zero(&trace_gcd) ||
+        !mlll_div_exact(&a, norm1, &trace_gcd) ||
+        !mlll_div_exact(&b, norm2, &trace_gcd))
+        goto cleanup;
+    if (mlll_product_bound(norm1, &b) > IBZ_BITS - 1)
+        goto cleanup;
+    ibz_mul(&candidate_norm, norm1, &b);
+
+    /* Put both scaled ideals over one common denominator. */
+    ibz_gcd(&denominator_gcd, &denominator1, &denominator2);
+    if (ibz_is_zero(&denominator_gcd) ||
+        !mlll_div_exact(&scale1, &denominator2, &denominator_gcd) ||
+        !mlll_div_exact(&scale2, &denominator1, &denominator_gcd))
+        goto cleanup;
+    ibz_mul(&common_denominator, &denominator1, &scale1);
+
+    /* Algorithm 3, Lines 5-6: ML2(b*alpha_1,...,b*alpha_4,
+     *                              a*beta_1,...,a*beta_4). */
+    for (int column = 0; column < 4; column++) {
+        for (int row = 0; row < 4; row++) {
+            if (!mlll_scaled_coordinate_fits(
+                    &lat1_red.basis[row][column], &scale1, &b) ||
+                !mlll_scaled_coordinate_fits(
+                    &lat2_red.basis[row][column], &scale2, &a))
+                goto cleanup;
+            ibz_mul(&quotient_scratch, &lat1_red.basis[row][column], &scale1);
+            ibz_mul(&generators[column][row], &quotient_scratch, &b);
+            ibz_mul(&quotient_scratch, &lat2_red.basis[row][column], &scale2);
+            ibz_mul(&generators[4 + column][row], &quotient_scratch, &a);
+        }
+    }
+    if (!mlll_full_rank_basis(&candidate.basis, generators, 8, alg))
+        goto cleanup;
+    ibz_copy(&candidate.denom, &common_denominator);
+    if (!quat_lattice_reduce_denom(&candidate, &candidate))
         goto cleanup;
 
-    /* Paper line 14: gamma <- LLL(gamma; delta=3/4) */
-    if (!quat_lattice_lll(&res_red, &candidate, alg))
-        goto cleanup;
-    ibz_mat_4x4_copy(&candidate.basis, &res_red);
-
-    /* Publish only after every fallible rank-reduction step succeeded. */
+    /* Publish only after every exact division and reduction succeeded. */
     ibz_mat_4x4_copy(&res->basis, &candidate.basis);
     ibz_copy(&res->denom, &candidate.denom);
+    ibz_copy(intersection_norm, &candidate_norm);
     ok = 1;
 
 cleanup:
-    ibz_mat_4x4_finalize(&res_red);
+    ibz_finalize(&quotient_scratch);
+    ibz_finalize(&candidate_norm);
+    ibz_finalize(&b);
+    ibz_finalize(&a);
+    ibz_finalize(&trace);
+    ibz_finalize(&trace_gcd);
+    ibz_finalize(&scale2);
+    ibz_finalize(&scale1);
+    ibz_finalize(&common_denominator);
+    ibz_finalize(&denominator_gcd);
+    ibz_finalize(&denominator_product);
+    ibz_finalize(&denominator2);
+    ibz_finalize(&denominator1);
+    ibz_vec_4_finalize(&right);
+    ibz_vec_4_finalize(&left);
+    for (int i = 0; i < 8; i++)
+        ibz_vec_4_finalize(&generators[i]);
     quat_lattice_finalize(&lat1_red);
     quat_lattice_finalize(&lat2_red);
-    quat_lattice_finalize(&dual1);
-    quat_lattice_finalize(&dual2);
-    quat_lattice_finalize(&dual_res);
     quat_lattice_finalize(&candidate);
     return ok;
 }

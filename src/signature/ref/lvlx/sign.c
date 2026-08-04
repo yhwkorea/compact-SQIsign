@@ -97,22 +97,32 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
 {
     quat_left_ideal_t lideal_chall_secret;
     quat_lattice_t lattice_hom_chall_to_com, lat_commit;
+    ibz_t ideal_norm_gcd;
     signature_step_status_t status = SIGNATURE_STEP_ML2_EXHAUSTED;
 
     // Init
     quat_left_ideal_init(&lideal_chall_secret);
     quat_lattice_init(&lat_commit);
     quat_lattice_init(&lattice_hom_chall_to_com);
+    ibz_init(&ideal_norm_gcd);
 
     // lideal_chall_secret = lideal_secret * lideal_chall_two
     if (!quat_lideal_inter(&lideal_chall_secret, lideal_chall_two, &(sk->secret_ideal), &QUATALG_PINFTY)) {
         goto cleanup;
     }
 
-    // now we compute lideal_com_to_chall which is dual(Icom)* lideal_chall_secret
+    /* Conjugate(Icom) and lideal_chall_secret are composable integral ideals:
+     * O_R(Conjugate(Icom)) = O_0 = O_L(lideal_chall_secret). When their
+     * norms are coprime, paper Lemma 13 identifies their intersection with
+     * their ordered product, computed by CompactIdealMultiplication. */
+    ibz_gcd(&ideal_norm_gcd, &lideal_commit->norm, &lideal_chall_secret.norm);
+    if (!ibz_is_one(&ideal_norm_gcd)) {
+        status = SIGNATURE_STEP_RETRY;
+        goto cleanup;
+    }
     quat_lattice_conjugate_without_hnf(&lat_commit, &(lideal_commit->lattice));
-    if (!quat_lattice_intersect_mlll(
-            &lattice_hom_chall_to_com, &lideal_chall_secret.lattice, &lat_commit, &QUATALG_PINFTY)) {
+    if (!quat_lattice_mul_mlll(
+            &lattice_hom_chall_to_com, &lat_commit, &lideal_chall_secret.lattice, &QUATALG_PINFTY)) {
         goto cleanup;
     }
 
@@ -126,6 +136,7 @@ compute_response_quat_element(quat_alg_elem_t *resp_quat,
 
     // Clean up
 cleanup:
+    ibz_finalize(&ideal_norm_gcd);
     quat_left_ideal_finalize(&lideal_chall_secret);
     quat_lattice_finalize(&lat_commit);
     quat_lattice_finalize(&lattice_hom_chall_to_com);

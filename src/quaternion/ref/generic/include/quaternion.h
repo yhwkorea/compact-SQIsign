@@ -430,19 +430,43 @@ int quat_lattice_intersect(quat_lattice_t *res,
                            const quat_lattice_t *lat2);
 
 /**
- * @brief Compact lattice intersection using ML2 for the generator sum.
+ * @brief Compact intersection of two integral left ideals.
+ *
+ * Implements CompactIdealIntersection (Algorithm 3): reduce both bases,
+ * recover nrd(I1 + I2) from the reduced-trace pairings, and reduce the eight
+ * generators of b*I1 + a*I2 = I1 intersect I2.
  *
  * @param res Output intersection lattice
- * @param lat1 First input lattice
- * @param lat2 Second input lattice
+ * @param intersection_norm Output reduced norm of the intersection ideal
+ * @param lat1 Lattice of the first integral left ideal
+ * @param norm1 Reduced norm of the first ideal
+ * @param lat2 Lattice of the second integral left ideal
+ * @param norm2 Reduced norm of the second ideal
  * @param alg The quaternion algebra
- * @returns 1 on success, 0 if ML2 did not produce a rank-four basis.
- *          On failure, res is left unchanged.
+ * @returns 1 on success, 0 on invalid input, inexact trace division, or if
+ *          ML2 did not produce a rank-four basis. On failure, res is unchanged.
  */
 int quat_lattice_intersect_mlll(quat_lattice_t *res,
-                                const quat_lattice_t *lat1,
-                                const quat_lattice_t *lat2,
-                                const quat_alg_t *alg);
+                                 ibz_t *intersection_norm,
+                                 const quat_lattice_t *lat1,
+                                 const ibz_t *norm1,
+                                 const quat_lattice_t *lat2,
+                                 const ibz_t *norm2,
+                                 const quat_alg_t *alg);
+
+/**
+ * @brief Compact product of two composable ideal lattices.
+ *
+ * Implements CompactIdealMultiplication (Algorithm 2) by applying ML2 to
+ * the sixteen ordered products of the input basis elements.
+ *
+ * @returns 1 on success. On failure, res is unchanged. Aliasing res with an
+ *          input is supported.
+ */
+int quat_lattice_mul_mlll(quat_lattice_t *res,
+                          const quat_lattice_t *lat1,
+                          const quat_lattice_t *lat2,
+                          const quat_alg_t *alg);
 
 /**
  * @brief Test whether x ∈ lat. If so, compute its coordinates in lat's basis.

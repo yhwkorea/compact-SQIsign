@@ -1029,6 +1029,16 @@ ml2_test_multiplication_alias_and_nonpublication(void)
     ml2_test_set_scalar_lattice(&lat2, 3, 1);
     ml2_test_set_scalar_lattice(&expected, 6, 1);
 
+    /* Replace the 2*Z^4 basis by a deliberately long unimodular basis of
+     * the same lattice. CompactIdealMultiplication must L2-reduce its inputs
+     * before it forms the sixteen products. */
+    ibz_set(&lat1.basis[0][1], 14);
+    ibz_set(&lat1.basis[0][2], -10);
+    ibz_set(&lat1.basis[1][2], 6);
+    ibz_set(&lat1.basis[0][3], 22);
+    ibz_set(&lat1.basis[1][3], -8);
+    ibz_set(&lat1.basis[2][3], 12);
+
     ml2_test_set_scalar_lattice(&result, 17, 19);
     if (!quat_lattice_mul_mlll(&result, &lat1, &lat2, &alg) ||
         !quat_lattice_equal(&result, &expected)) {

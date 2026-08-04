@@ -379,15 +379,19 @@ quat_lideal_inter(quat_left_ideal_t *inter,
     int ok = 0;
     quat_left_ideal_init(&candidate);
 
-    /* paper Issue 8 wire — sign hot path (sign.c:81 quat_lideal_inter)
-     * routes through here. Use intersect_mlll for paper Algorithm
-     * CompactLatticeIntersection (LLL-reduced bases, ML2/MLLL output). */
+    /* Paper Algorithm 3, CompactIdealIntersection. The ideal norms are part
+     * of the algorithm: together with all reduced-trace pairings they recover
+     * nrd(I1 + I2), hence the eight generators of I1 intersect I2. */
     if (!quat_lattice_intersect_mlll(
-            &candidate.lattice, &I1->lattice, &I2->lattice, alg))
+            &candidate.lattice,
+            &candidate.norm,
+            &I1->lattice,
+            &I1->norm,
+            &I2->lattice,
+            &I2->norm,
+            alg))
         goto cleanup;
     candidate.parent_order = I1->parent_order;
-    if (!quat_lideal_norm(&candidate))
-        goto cleanup;
     quat_lideal_copy(inter, &candidate);
     ok = 1;
 
