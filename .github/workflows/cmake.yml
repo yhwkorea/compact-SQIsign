@@ -52,14 +52,24 @@ jobs:
             enable_sign: ON
             gmp_library: MINI
 
-    runs-on: [self-hosted, "${{ matrix.platform }}"]
+    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
 
     steps:
       - uses: actions/checkout@v4
 
-      ##    - name: Install dependencies Valgrind, GMP, Doxygen, TeX, gcc-multilib
-      ##      run: |
-      ##          sudo apt update && sudo apt --fix-missing install valgrind libgmp-dev doxygen texlive-xetex gcc-multilib
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build clang ccache libgmp-dev valgrind
+
+      - name: Install 32-bit build dependencies
+        if: ${{ matrix.toolchain != '' }}
+        run: sudo apt-get install -y --no-install-recommends gcc-multilib
+
+      - name: Install documentation dependencies
+        if: ${{ ((matrix.gf_radix != 32) && (matrix.enable_sign == 'ON') && (matrix.gmp_library == 'SYSTEM')) }}
+        run: sudo apt-get install -y --no-install-recommends doxygen texlive-xetex
 
       - name: Set up environment for ccache
         run: echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
@@ -73,7 +83,7 @@ jobs:
         # Build your program with the given configuration
         run: |
           if [ -n "${{ matrix.toolchain }}" ]; then
-              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src
+              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src || echo "no local GMP cache; CMake will download it"
           fi
           cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
 
@@ -108,7 +118,7 @@ jobs:
           rm -rf build
           cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DSQISIGN_BUILD_TYPE=${{ matrix.sqisign_build_type }} -DCMAKE_C_COMPILER=clang -DSQISIGN_TEST_REPS=1 -DGF_RADIX=${{ matrix.gf_radix }} -DENABLE_SIGN=${{ matrix.enable_sign }} -DGMP_LIBRARY=${{ matrix.gmp_library }} ${{ matrix.toolchain && format('-DCMAKE_TOOLCHAIN_FILE={0}', matrix.toolchain) || '' }} -G Ninja
           if [ -n "${{ matrix.toolchain }}" ]; then
-              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src
+              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src || echo "no local GMP cache; CMake will download it"
           fi
           cmake --build build
           CTEST_OUTPUT_ON_FAILURE=1 ctest -j4 -V --test-dir build -E "KAT$"
@@ -118,7 +128,7 @@ jobs:
           rm -rf build
           cmake -Bbuild -DSQISIGN_TEST_REPS=1 -DSQISIGN_BUILD_TYPE=${{ matrix.sqisign_build_type }} -DSQISIGN_TEST_REPS=1 -DGF_RADIX=${{ matrix.gf_radix }} -DENABLE_SIGN=${{ matrix.enable_sign }} -DGMP_LIBRARY=${{ matrix.gmp_library }} ${{ matrix.toolchain && format('-DCMAKE_TOOLCHAIN_FILE={0}', matrix.toolchain) || '' }} -G Ninja
           if [ -n "${{ matrix.toolchain }}" ]; then
-              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src
+              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src || echo "no local GMP cache; CMake will download it"
           fi
           cmake --build build
           valgrind --error-exitcode=1 --max-stackframe=4116160 ./build/test/sqisign_test_scheme_lvl3
@@ -131,7 +141,7 @@ jobs:
           rm -rf build
           cmake -Bbuild -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release -DSQISIGN_BUILD_TYPE=${{ matrix.sqisign_build_type }} -DGF_RADIX=${{ matrix.gf_radix }} -DENABLE_SIGN=${{ matrix.enable_sign }} -DGMP_LIBRARY=${{ matrix.gmp_library }} -DCMAKE_C_COMPILER=clang ${{ matrix.toolchain && format('-DCMAKE_TOOLCHAIN_FILE={0}', matrix.toolchain) || '' }} -G Ninja
           if [ -n "${{ matrix.toolchain }}" ]; then
-              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src
+              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src || echo "no local GMP cache; CMake will download it"
           fi
           cmake --build build
           find . -name '*.so' | grep so
@@ -142,7 +152,7 @@ jobs:
           rm -rf build
           cmake -Bbuild -DCMAKE_BUILD_TYPE=ASAN -DSQISIGN_BUILD_TYPE=${{ matrix.sqisign_build_type }} -DCMAKE_C_COMPILER=clang -DSQISIGN_TEST_REPS=1 -DGF_RADIX=${{ matrix.gf_radix }} -DENABLE_SIGN=${{ matrix.enable_sign }} -DGMP_LIBRARY=${{ matrix.gmp_library }} ${{ matrix.toolchain && format('-DCMAKE_TOOLCHAIN_FILE={0}', matrix.toolchain) || '' }} -G Ninja
           if [ -n "${{ matrix.toolchain }}" ]; then
-              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src
+              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src || echo "no local GMP cache; CMake will download it"
           fi
           cmake --build build
           CTEST_OUTPUT_ON_FAILURE=1 ctest -j4 -V --test-dir build -E "KAT$"
@@ -153,7 +163,7 @@ jobs:
           rm -rf build
           cmake -Bbuild -DCMAKE_BUILD_TYPE=MSAN -DSQISIGN_BUILD_TYPE=${{ matrix.sqisign_build_type }} -DCMAKE_C_COMPILER=clang -DSQISIGN_TEST_REPS=1 -DGF_RADIX=${{ matrix.gf_radix }} -DENABLE_SIGN=${{ matrix.enable_sign }} -DGMP_LIBRARY=${{ matrix.gmp_library }} ${{ matrix.toolchain && format('-DCMAKE_TOOLCHAIN_FILE={0}', matrix.toolchain) || '' }} -G Ninja
           if [ -n "${{ matrix.toolchain }}" ]; then
-              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src
+              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src || echo "no local GMP cache; CMake will download it"
           fi
           cmake --build build
           CTEST_OUTPUT_ON_FAILURE=1 ctest -j4 -V --test-dir build -E "KAT$"
@@ -164,7 +174,7 @@ jobs:
           rm -rf build
           cmake -Bbuild -DCMAKE_BUILD_TYPE=LSAN -DSQISIGN_BUILD_TYPE=${{ matrix.sqisign_build_type }} -DCMAKE_C_COMPILER=clang -DSQISIGN_TEST_REPS=1 -DGF_RADIX=${{ matrix.gf_radix }} -DENABLE_SIGN=${{ matrix.enable_sign }} -DGMP_LIBRARY=${{ matrix.gmp_library }} ${{ matrix.toolchain && format('-DCMAKE_TOOLCHAIN_FILE={0}', matrix.toolchain) || '' }} -G Ninja
           if [ -n "${{ matrix.toolchain }}" ]; then
-              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src
+              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src || echo "no local GMP cache; CMake will download it"
           fi
           cmake --build build
           CTEST_OUTPUT_ON_FAILURE=1 ctest -j4 -V --test-dir build -E "KAT$"
@@ -174,15 +184,20 @@ jobs:
           rm -rf build
           cmake -Bbuild -DCMAKE_BUILD_TYPE=UBSAN -DSQISIGN_BUILD_TYPE=${{ matrix.sqisign_build_type }} -DCMAKE_C_COMPILER=clang -DSQISIGN_TEST_REPS=1 -DGF_RADIX=${{ matrix.gf_radix }} -DENABLE_SIGN=${{ matrix.enable_sign }} -DGMP_LIBRARY=${{ matrix.gmp_library }} ${{ matrix.toolchain && format('-DCMAKE_TOOLCHAIN_FILE={0}', matrix.toolchain) || '' }} -G Ninja
           if [ -n "${{ matrix.toolchain }}" ]; then
-              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src
+              cp ~/gmp-6.3.0.tar.xz ${{github.workspace}}/build/libgmp/src || echo "no local GMP cache; CMake will download it"
           fi
           cmake --build build
           CTEST_OUTPUT_ON_FAILURE=1 ctest -j4 -V --test-dir build -E "KAT$"
 
   fixed-precision-overflow:
-    runs-on: [self-hosted, x64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
 
       - name: Configure fixed-precision overflow checks
         run: >-
