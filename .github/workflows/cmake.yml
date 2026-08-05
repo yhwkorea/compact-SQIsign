@@ -14,6 +14,7 @@ jobs:
   build:
     # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
     strategy:
+      fail-fast: false
       matrix:
         platform: [x64, arm64]
         toolchain: [""]
