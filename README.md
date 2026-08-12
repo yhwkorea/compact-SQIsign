@@ -3,11 +3,12 @@
 A fixed-precision C implementation of SQIsign with the algorithms in the paper
 "Compact Quaternion Algorithms for SQIsign", allowing the precision
 width to shrink from the upstream `{110, 168, 222}` limbs (https://github.com/munsanwon2/SQIsign-Fixed-Precision) to
-the paper's `{28, 43, 56}` limbs at NIST levels I / III / V.
+the heuristic profile's `{26, 40, 52}` limbs at NIST levels I / III / V.
 
 The `IBZ_LIMBS_lvl{1,3,5}` defaults in
 `src/quaternion/ref/generic/include/intbig.h` are already set to
-`{28, 43, 56}`.
+`{26, 40, 52}`. These complete 64-bit signed widths cover the heuristic
+`{1653, 2509, 3307}`-bit magnitude bounds.
 
 ## Requirements
 
@@ -111,11 +112,13 @@ counts, configure with `-DENABLE_ML2_PROFILE=ON` and run the signature tests.
 
 ## Benchmarking & reproducing the published numbers
 
-Pre-built results from this fork vs. the KLKL25 baseline live under
+Pre-built results from the earlier 28/43/56-limb profile vs. the KLKL25 baseline live under
 [`bench-results/`](bench-results/). The methodology and machine spec used to
 produce them are documented in
 [`bench-results/README.md`](bench-results/README.md). What follows is the
-procedure to reproduce those numbers from a clean clone.
+original procedure used to produce those archived numbers. The current
+26/40/52-limb defaults require a fresh benchmark run for directly comparable
+measurements.
 
 ### Machine used for the published numbers
 
@@ -129,7 +132,9 @@ procedure to reproduce those numbers from a clean clone.
 
 ### Step 1. Build both implementations
 
-`Ours` is this repository, already at the paper-bound `{28, 43, 56}` limbs:
+`Ours` is this repository, using the heuristic `{26, 40, 52}`-limb profile.
+The command below builds the current code; it does not reproduce the archived
+28/43/56-limb timings byte-for-byte:
 
 ```bash
 # in this repo

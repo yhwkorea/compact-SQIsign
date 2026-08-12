@@ -29,9 +29,11 @@ extern "C"
 #define _IBZ_CONCAT(a, b) a##b
 #define _IBZ_CONCAT2(a, b) _IBZ_CONCAT(a, b)
 
-#define IBZ_LIMBS_lvl1 28  /* NIST Level I:   1792 total bits */
-#define IBZ_LIMBS_lvl3 43  /* NIST Level III: 2752 total bits */
-#define IBZ_LIMBS_lvl5 56  /* NIST Level V:   3584 total bits */
+/* Heuristic magnitude bounds 1653 / 2509 / 3307, with one sign bit and
+ * rounded up to complete 64-bit limbs. */
+#define IBZ_LIMBS_lvl1 26  /* NIST Level I:   1664 total / 1663 magnitude bits */
+#define IBZ_LIMBS_lvl3 40  /* NIST Level III: 2560 total / 2559 magnitude bits */
+#define IBZ_LIMBS_lvl5 52  /* NIST Level V:   3328 total / 3327 magnitude bits */
 
 #ifdef SQISIGN_VARIANT
 #define IBZ_LIMBS _IBZ_CONCAT2(IBZ_LIMBS_, SQISIGN_VARIANT)
