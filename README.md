@@ -1,16 +1,17 @@
 # compact-SQIsign
 
 A fixed-precision C implementation of SQIsign with the algorithms in the paper
-"Compact Quaternion Algorithms for SQIsign".  The paper's main-body
-worst-case magnitude bounds are `{1830, 2752, 3611}` bits at NIST levels
-I / III / V.  Since `ibz_t` is a signed two's-complement type, one sign bit is
-reserved before rounding to complete 64-bit limbs, giving `{29, 44, 57}` limbs
-instead of the upstream `{110, 168, 222}` limbs
-(https://github.com/munsanwon2/SQIsign-Fixed-Precision).
+"Compact Quaternion Algorithms for SQIsign".  This branch uses the expanded
+heuristic magnitude bounds `{1665, 2521, 3319}` bits at NIST levels I / III /
+V.  Since `ibz_t` is a signed two's-complement type, one sign bit is reserved
+before rounding to complete 64-bit limbs, giving `{27, 40, 52}` limbs instead
+of the upstream `{110, 168, 222}` limbs
+(https://github.com/munsanwon2/SQIsign-Fixed-Precision). These widths do not
+claim the paper's larger `{1830, 2752, 3611}` main-body worst-case bounds.
 
 The `IBZ_LIMBS_lvl{1,3,5}` defaults in
 `src/quaternion/ref/generic/include/intbig.h` are already set to
-`{29, 44, 57}`.
+`{27, 40, 52}`.
 
 ## Requirements
 
@@ -114,11 +115,12 @@ counts, configure with `-DENABLE_ML2_PROFILE=ON` and run the signature tests.
 
 ## Benchmarking & reproducing the published numbers
 
-Pre-built results from this fork vs. the KLKL25 baseline live under
+Pre-built results from the earlier 29/44/57-limb profile vs. the KLKL25 baseline live under
 [`bench-results/`](bench-results/). The methodology and machine spec used to
 produce them are documented in
 [`bench-results/README.md`](bench-results/README.md). What follows is the
-procedure to reproduce those numbers from a clean clone.
+original procedure used to produce those archived numbers. The current
+27/40/52-limb defaults require a fresh run for directly comparable timings.
 
 ### Machine used for the published numbers
 
@@ -132,8 +134,9 @@ procedure to reproduce those numbers from a clean clone.
 
 ### Step 1. Build both implementations
 
-`Ours` is this repository, already at the main-body worst-case
-`{29, 44, 57}` signed limbs:
+`Ours` is this repository, currently using `{27, 40, 52}` signed limbs. The
+command below builds the current profile; it does not reproduce the archived
+29/44/57-limb timings byte-for-byte:
 
 ```bash
 # in this repo

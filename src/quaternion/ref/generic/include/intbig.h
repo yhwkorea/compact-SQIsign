@@ -29,12 +29,11 @@ extern "C"
 #define _IBZ_CONCAT(a, b) a##b
 #define _IBZ_CONCAT2(a, b) _IBZ_CONCAT(a, b)
 
-/* Main-body worst-case magnitude bounds from Table 2.  ibz_t uses signed
- * two's-complement representation, so reserve one sign bit before rounding
- * the 1830 / 2752 / 3611-bit bounds up to complete 64-bit limbs. */
-#define IBZ_LIMBS_lvl1 29  /* NIST-I:   1856 total / 1855 magnitude bits */
-#define IBZ_LIMBS_lvl3 44  /* NIST-III: 2816 total / 2815 magnitude bits */
-#define IBZ_LIMBS_lvl5 57  /* NIST-V:   3648 total / 3647 magnitude bits */
+/* Expanded heuristic magnitude bounds 1665 / 2521 / 3319, with one sign
+ * bit and rounded up to complete 64-bit limbs. */
+#define IBZ_LIMBS_lvl1 27  /* NIST-I:   1728 total / 1727 magnitude bits */
+#define IBZ_LIMBS_lvl3 40  /* NIST-III: 2560 total / 2559 magnitude bits */
+#define IBZ_LIMBS_lvl5 52  /* NIST-V:   3328 total / 3327 magnitude bits */
 
 #ifdef SQISIGN_VARIANT
 #define IBZ_LIMBS _IBZ_CONCAT2(IBZ_LIMBS_, SQISIGN_VARIANT)
@@ -43,13 +42,10 @@ extern "C"
 #endif
 #endif
 
-/* These HNF caps deliberately remain below the signed storage widths.  The
- * extra sign limb must not widen HNF eligibility: HNF's Bezout intermediates
- * need more headroom than the routing estimate, so larger products continue
- * along the paper's compact ML2 route. */
-#define IBZ_HNF_ROUTE_BITS_lvl1 (28 * 64)
-#define IBZ_HNF_ROUTE_BITS_lvl3 (43 * 64)
-#define IBZ_HNF_ROUTE_BITS_lvl5 (56 * 64)
+/* Keep every route cap within the configured signed storage width. */
+#define IBZ_HNF_ROUTE_BITS_lvl1 (27 * 64)
+#define IBZ_HNF_ROUTE_BITS_lvl3 (40 * 64)
+#define IBZ_HNF_ROUTE_BITS_lvl5 (52 * 64)
 #ifdef SQISIGN_VARIANT
 #define IBZ_HNF_ROUTE_BITS _IBZ_CONCAT2(IBZ_HNF_ROUTE_BITS_, SQISIGN_VARIANT)
 #else

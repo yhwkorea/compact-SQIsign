@@ -22,7 +22,9 @@ Last updated: 2026-08-04 (Asia/Seoul)
   of `b I1 + a I2`.
 - Main-body uniform worst-case bit bounds are 1830/2752/3611 bits for
   NIST-I/III/V. Because `ibz_t` is signed two's-complement, the selected
-  complete 64-bit storage widths are 29/44/57 limbs.
+  complete 64-bit storage widths required for that formal profile are
+  29/44/57 limbs. The current branch default is instead the user-selected
+  expanded heuristic 1665/2521/3319-bit profile at 27/40/52 limbs.
 - ML2 floating-point precision remains 53 significant bits (`double`).
 
 ## Implemented state
@@ -43,11 +45,11 @@ Last updated: 2026-08-04 (Asia/Seoul)
 - Both compact operations publish output only after all exact divisions,
   overflow preflights, and rank checks succeed. Input/output aliasing is
   supported.
-- `IBZ_LIMBS_lvl1/lvl3/lvl5` are `29/44/57`. The corresponding negative
+- `IBZ_LIMBS_lvl1/lvl3/lvl5` are `27/40/52`. The corresponding negative
   precomputation constants were shortened by exact two's-complement sign
   extension; their represented integer values are unchanged.
-- `IBZ_HNF_ROUTE_BITS_lvl1/lvl3/lvl5` remain `28*64/43*64/56*64`. The extra
-  signed storage limb must not route larger values into HNF.
+- `IBZ_HNF_ROUTE_BITS_lvl1/lvl3/lvl5` are bounded by the configured storage at
+  `27*64/40*64/52*64`; the intended compact signing path does not use HNF.
 
 ## Changed files
 
@@ -127,3 +129,36 @@ Last updated: 2026-08-04 (Asia/Seoul)
 - This file is included in the delivery commit. If this copy was read from
   `origin/worst-case`, the push completed. If it exists only in a local
   clone, the sole remaining delivery command is `git push origin worst-case`.
+
+## Expanded heuristic precision profile (2026-08-12)
+
+- At the user's request, the public `worst-case` history is retained while
+  the fixed-width profile is changed to the expanded heuristic magnitude
+  bounds `{1665, 2521, 3319}` bits.  The resulting signed storage widths are
+  `{27, 40, 52}` 64-bit limbs, with magnitude capacities
+  `{1727, 2559, 3327}` bits and headroom `{62, 38, 8}` bits.
+- This profile intentionally does **not** claim the paper's larger
+  `{1830, 2752, 3611}` main-body worst-case bounds.  README wording was
+  updated so the branch name cannot be mistaken for a formal width claim.
+- The existing Algorithm 2/3 and signing arithmetic are unchanged.  The HNF
+  route caps were only made configuration-safe by keeping them at or below
+  storage: `{27, 40, 52} * 64` bits.
+- Generated negative quaternion constants were shortened only by removing
+  redundant high all-one sign-extension limbs; all full-range `-1`
+  initializers now use `[0 ... IBZ_LIMBS - 1]`.  A signed BigInteger oracle
+  compared every precomputed `ibz_t` before/after: lvl1 `352/352`, lvl3
+  `402/402`, lvl5 `352/352`, for 1,106 exact matches and zero overlong
+  initializers.
+- Fresh WSL Debug/ref and Release/ref builds, both with
+  `ENABLE_INTBIG_OVERFLOW_CHECK=ON`, compiled the lvl1/3/5 quaternion and
+  end-to-end scheme targets.  Deterministic `--seed=1` runs passed all six
+  targets in each build.  Release KeyGen/Sign/Verify also passed seeds 2--5
+  at every level (12 additional transcripts).
+- One initial parallel Debug CTest run had a lvl1 randomized
+  `lat_ball_paralellogram_randomized` failure while all three end-to-end
+  tests passed.  The printed seed then passed four consecutive isolated
+  reruns, including three in a loop; this was recorded as a non-reproducible
+  randomized-test flake rather than hidden.
+- `git diff --check` passes.  The change set is limited to README, this
+  handoff, `intbig.h`, and the three generated quaternion-data files; no
+  algorithm implementation source is modified.
