@@ -1,13 +1,14 @@
 # compact-SQIsign
 
 A fixed-precision C implementation of SQIsign with the algorithms in the paper
-"Compact Quaternion Algorithms for SQIsign".  This branch uses the expanded
-heuristic magnitude bounds `{1665, 2521, 3319}` bits at NIST levels I / III /
-V.  Since `ibz_t` is a signed two's-complement type, one sign bit is reserved
-before rounding to complete 64-bit limbs, giving `{27, 40, 52}` limbs instead
-of the upstream `{110, 168, 222}` limbs
-(https://github.com/munsanwon2/SQIsign-Fixed-Precision). These widths do not
-claim the paper's larger `{1830, 2752, 3611}` main-body worst-case bounds.
+"Compact Quaternion Algorithms for SQIsign".  This branch uses the revised
+worst-case magnitude bounds `{1665, 2521, 3319}` bits at NIST levels I / III /
+V.  These bounds supersede the earlier conservative `{1830, 2752, 3611}`
+figures for this implementation profile.  Since `ibz_t` is a signed
+two's-complement type, one sign bit is reserved before rounding to complete
+64-bit limbs, giving `{27, 40, 52}` limbs instead of the upstream
+`{110, 168, 222}` limbs
+(https://github.com/munsanwon2/SQIsign-Fixed-Precision).
 
 The `IBZ_LIMBS_lvl{1,3,5}` defaults in
 `src/quaternion/ref/generic/include/intbig.h` are already set to

@@ -20,11 +20,11 @@ Last updated: 2026-08-04 (Asia/Seoul)
   set `d = gcd(nrd(I1), nrd(I2), traces)`, set
   `a = nrd(I1)/d`, `b = nrd(I2)/d`, and run ML2 on the eight generators
   of `b I1 + a I2`.
-- Main-body uniform worst-case bit bounds are 1830/2752/3611 bits for
-  NIST-I/III/V. Because `ibz_t` is signed two's-complement, the selected
-  complete 64-bit storage widths required for that formal profile are
-  29/44/57 limbs. The current branch default is instead the user-selected
-  expanded heuristic 1665/2521/3319-bit profile at 27/40/52 limbs.
+- The revised uniform worst-case magnitude bounds are 1665/2521/3319 bits
+  for NIST-I/III/V. They supersede the earlier conservative
+  1830/2752/3611 figures for this implementation profile. Because `ibz_t`
+  is signed two's-complement, reserving one sign bit and rounding to complete
+  64-bit storage gives 27/40/52 limbs.
 - ML2 floating-point precision remains 53 significant bits (`double`).
 
 ## Implemented state
@@ -130,16 +130,15 @@ Last updated: 2026-08-04 (Asia/Seoul)
   `origin/worst-case`, the push completed. If it exists only in a local
   clone, the sole remaining delivery command is `git push origin worst-case`.
 
-## Expanded heuristic precision profile (2026-08-12)
+## Revised worst-case precision profile (2026-08-12)
 
-- At the user's request, the public `worst-case` history is retained while
-  the fixed-width profile is changed to the expanded heuristic magnitude
-  bounds `{1665, 2521, 3319}` bits.  The resulting signed storage widths are
+- The fixed-width profile implements the revised worst-case magnitude bounds
+  `{1665, 2521, 3319}` bits.  The resulting signed storage widths are
   `{27, 40, 52}` 64-bit limbs, with magnitude capacities
   `{1727, 2559, 3327}` bits and headroom `{62, 38, 8}` bits.
-- This profile intentionally does **not** claim the paper's larger
-  `{1830, 2752, 3611}` main-body worst-case bounds.  README wording was
-  updated so the branch name cannot be mistaken for a formal width claim.
+- The earlier conservative `{1830, 2752, 3611}` figures are superseded for
+  this implementation profile; `worst-case` is therefore the intended and
+  accurate description of the configured bounds.
 - The existing Algorithm 2/3 and signing arithmetic are unchanged.  The HNF
   route caps were only made configuration-safe by keeping them at or below
   storage: `{27, 40, 52} * 64` bits.
@@ -162,3 +161,12 @@ Last updated: 2026-08-04 (Asia/Seoul)
 - `git diff --check` passes.  The change set is limited to README, this
   handoff, `intbig.h`, and the three generated quaternion-data files; no
   algorithm implementation source is modified.
+
+## Worst-case terminology clarification (2026-08-12)
+
+- The user clarified that `{1665, 2521, 3319}` are the revised worst-case
+  bounds themselves, not heuristic bounds. README, this handoff, and the
+  explanatory `intbig.h` comment were aligned with that terminology.
+- This clarification changes documentation and one source comment only.
+  Precision macros, generated constants, HNF routing, and all executable
+  algorithm code remain byte-for-byte unchanged from `c227f74`.

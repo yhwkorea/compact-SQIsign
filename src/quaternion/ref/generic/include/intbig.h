@@ -29,8 +29,8 @@ extern "C"
 #define _IBZ_CONCAT(a, b) a##b
 #define _IBZ_CONCAT2(a, b) _IBZ_CONCAT(a, b)
 
-/* Expanded heuristic magnitude bounds 1665 / 2521 / 3319, with one sign
- * bit and rounded up to complete 64-bit limbs. */
+/* Revised worst-case magnitude bounds 1665 / 2521 / 3319, with one sign bit
+ * and rounded up to complete 64-bit limbs. */
 #define IBZ_LIMBS_lvl1 27  /* NIST-I:   1728 total / 1727 magnitude bits */
 #define IBZ_LIMBS_lvl3 40  /* NIST-III: 2560 total / 2559 magnitude bits */
 #define IBZ_LIMBS_lvl5 52  /* NIST-V:   3328 total / 3327 magnitude bits */
